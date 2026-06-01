@@ -1,27 +1,19 @@
--- ================================================================================================
--- TITLE : lua_ls (Lua Language Server) LSP Setup
--- LINKS :
---   > github: https://github.com/LuaLS/lua-language-server
--- ================================================================================================
-
---- @param capabilities table LSP client capabilities (typically from nvim-cmp or similar)
---- @return nil
 return function(capabilities)
 	vim.lsp.config("lua_ls", {
 		capabilities = capabilities,
 		settings = {
 			Lua = {
-				diagnostics = {
-					globals = { "vim" },
-				},
+				diagnostics = { globals = { "vim" } },
 				workspace = {
 					library = {
 						vim.fn.expand("$VIMRUNTIME/lua"),
-						vim.fn.expand("$XDG_CONFIG_HOME") .. "/nvim/lua",
+						-- stdpath("config") resolves to ~/.config/nvim even when
+						-- $XDG_CONFIG_HOME isn't exported (common), so lua_ls reliably
+						-- indexes your own gerrrt.* modules for completion.
+						vim.fn.stdpath("config") .. "/lua",
 					},
 				},
 			},
 		},
 	})
 end
-
