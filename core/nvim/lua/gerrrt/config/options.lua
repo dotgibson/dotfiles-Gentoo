@@ -40,8 +40,14 @@ vim.opt.showmode = false -- Don't show mode in command line
 vim.opt.pumheight = 10 -- Popup menu height
 vim.opt.pumblend = 10 -- Popup menu transparency
 vim.opt.winblend = 0 -- Floating window transparency
-vim.opt.conceallevel = 2 -- Conceal markup (links/bold markers) in markdown etc.
-vim.opt.concealcursor = "" -- Show markup even on cursor line
+-- Global default border for ALL floating windows (LSP hover, signature help, diagnostics
+-- floats, etc.). One setting instead of per-plugin `border=` options. (Neovim 0.11+)
+-- The diagnostics float already requests "rounded" explicitly in utils/diagnostics.lua;
+-- this makes everything else match it for free.
+vim.opt.winborder = "rounded"
+-- NOTE: conceallevel/concealcursor are set per-filetype in the markdown autocmd
+-- (config/autocmds.lua), not globally — concealing in non-markdown buffers can hide
+-- characters unexpectedly (e.g. in some JSON/LSP setups).
 vim.opt.redrawtime = 10000 -- Timeout for syntax highlighting redraw
 vim.opt.maxmempattern = 20000 -- Max memory for pattern matching
 vim.opt.synmaxcol = 300 -- Syntax highlighting column limit
@@ -57,7 +63,7 @@ vim.opt.ttimeoutlen = 0 -- No wait for key code sequences
 vim.opt.autoread = true -- Auto-reload file if changed outside
 vim.opt.autowrite = false -- Don't auto-save on some events
 vim.opt.diffopt:append("vertical") -- Vertical diff splits
-vim.opt.diffopt:append("algorithm:patience") -- Better diff algorithm
+vim.opt.diffopt:append("algorithm:histogram") -- Better diff algorithm (matches gitconfig's diff.algorithm)
 vim.opt.diffopt:append("linematch:60") -- Better diff highlighting (smart line matching)
 
 -- Set undo directory and ensure it exists
@@ -76,6 +82,9 @@ vim.opt.iskeyword:append("-") -- Treat dash as part of a word
 vim.opt.path:append("**") -- Search into subfolders with `gf`
 vim.opt.selection = "inclusive" -- Use inclusive selection
 vim.opt.mouse = "a" -- Enable mouse support
+if vim.env.TMUX then
+	vim.keymap.set({ "n", "v" }, "<LeftDrag>", "<Nop>", { silent = true })
+end
 -- NOTE: system clipboard is handled in clipboard.lua via a custom provider and
 -- the "+ register (opt-in). We deliberately do NOT force unnamedplus here, so
 -- normal yanks/deletes stay in Neovim's registers (keeps <leader>p sane).

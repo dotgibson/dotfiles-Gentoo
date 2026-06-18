@@ -42,9 +42,12 @@ fi
 alias -- -='cd -'
 
 # ── disk / process / monitor ──────────────────────────────────────────────────
-[[ -n ${HAVE_DUST:-} ]] && alias du='dust'
+[[ -n ${HAVE_DUST:-} ]]  && alias du='dust'
 [[ -n ${HAVE_PROCS:-} ]] && alias ps='procs'
-[[ -n ${HAVE_BTOP:-} ]] && alias top='btop' && alias htop='btop'
+[[ -n ${HAVE_BTOP:-} ]]  && alias top='btop' && alias htop='btop'
+[[ -n ${HAVE_VIDDY:-} ]] && alias watch='viddy'
+# df → duf (modern, mountpoint-aware); classic `df -h` stays the bare-box fallback.
+if [[ -n ${HAVE_DUF:-} ]]; then alias df='duf'; else alias df='df -h'; fi
 
 # ── file manager ──────────────────────────────────────────────────────────────
 [[ -n ${HAVE_YAZI:-} ]] && {
@@ -63,19 +66,22 @@ alias -- -='cd -'
 # doggo: modern dig (DNS recon). dig stays as-is; this is a distinct verb.
 [[ -n ${HAVE_DOGGO:-} ]] && alias dns='doggo'
 # gron / sd are their own commands (no alias — never shadow sed in scripts).
+# jq / yq / hyperfine / shellcheck / shfmt are likewise their own commands: they
+# shadow nothing classic, so they get HAVE_* detection in tools.zsh but no alias.
 
 # ── editor + misc QoL ─────────────────────────────────────────────────────────
 alias vim='nvim'
-alias df='df -h'
-alias diff='diff --color=auto'
+# diff: colourise ONLY when this box's diff actually supports `--color` (GNU does;
+# BSD/macOS diff — the dotfiles-MacBook target — does NOT, where an unconditional
+# alias would make every `diff` invocation error). Feature-probe once at load with a
+# no-op comparison; the bare classic `diff` stays the fallback. (df → duf/df -h above.)
+if diff --color=auto /dev/null /dev/null >/dev/null 2>&1; then
+  alias diff='diff --color=auto'
+fi
 
-# ── git quality-of-life (delta is wired in git/gitconfig, not here) ──────────
-alias g='git'
-alias gs='git status -sb'
-alias gd='git diff'
-alias gl='git log --oneline --graph --decorate -20'
-alias glog='PAGER="less -F -X" git log'
-alias gadog='PAGER="less -F -X" git log --all --decorate --oneline --graph'
+# ── git ───────────────────────────────────────────────────────────────────────
+# The git alias set is the single source of truth in git.zsh (OMZ-style, loaded
+# right after this file). Only the non-git lazygit launcher lives here.
 alias lg='lazygit'
 
 # ── named directories (~dots, ~proj) ──────────────────────────────────────────
@@ -87,13 +93,19 @@ hash -d proj="$HOME/Projects"
 alias notes='cd "$NOTES_DIR" && nvim .'
 
 # ── safety nets (POSIX, intentionally NOT modernized) ────────────────────────
+# rm: macOS overrides this to `trash` in os/macos.zsh when trash(1) is available.
 alias rm='rm -i'
 alias cp='cp -i'
 alias mv='mv -i'
 alias mkdir='mkdir -p'
 
+# ── help / docs ───────────────────────────────────────────────────────────────
+# tealdeer: `help <cmd>` → community-curated quick-reference (complement to man).
+[[ -n ${HAVE_TLDR:-} ]] && alias help='tldr'
+
 # ── network conveniences (stay in Core; anything engagement-flavored -> Kali)─
 alias myip='curl -fsS https://ifconfig.me 2>/dev/null && echo'
 alias ports='ss -tulpn 2>/dev/null || netstat -tulpn'
+[[ -n ${HAVE_GPING:-} ]] && alias ping='gping'
 # NOTE: `serve` is now a function in functions.zsh (prints the reachable URL and
 # takes an optional port), replacing the old `python3 -m http.server` alias.

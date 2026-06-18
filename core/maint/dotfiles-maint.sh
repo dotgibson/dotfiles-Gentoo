@@ -12,7 +12,7 @@
 # Env knobs (set in the scheduler unit or your shell before a manual run):
 #   MAINT_SYSTEM_UPGRADE=0   # 1 = also apply system pkgs (apt/dnf/zypper/brew ONLY)
 #   ZPLUGINDIR=~/.config/zsh/plugins
-#   MAINT_NVIM_TIMEOUT=600    MAINT_BREW_TIMEOUT=900
+#   MAINT_NVIM_TIMEOUT=600    MAINT_BREW_TIMEOUT=900    MAINT_TS_TIMEOUT=300
 #   MAINT_ENABLED=1          # 0 = no-op (e.g. drop a guard on a Kali engagement box)
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -25,7 +25,13 @@ export HOME="${HOME:?}"
 : "${MAINT_ENABLED:=1}"
 : "${MAINT_SYSTEM_UPGRADE:=0}"
 : "${MAINT_NVIM_TIMEOUT:=600}"
+: "${MAINT_TS_TIMEOUT:=300}" # seconds the headless TS parser update may block (see below)
 : "${MAINT_BREW_TIMEOUT:=900}"
+# Log rotation bound (B6): trim to MAINT_LOG_KEEP lines once the log passes
+# MAINT_LOG_MAX, so an append-only daily log can't grow without limit. Configurable so
+# a noisy box can keep more history (or a tiny one less); KEEP < MAX or trimming churns.
+: "${MAINT_LOG_MAX:=800}"
+: "${MAINT_LOG_KEEP:=600}"
 
 [[ "$MAINT_ENABLED" == 1 ]] || exit 0
 
@@ -41,9 +47,10 @@ if ! mkdir "$LOCK" 2>/dev/null; then
 fi
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 
-# ── keep the log from growing forever (last ~800 lines) ───────────────────────
-if [[ -f "$LOG" ]] && [[ "$(wc -l <"$LOG" 2>/dev/null || echo 0)" -gt 800 ]]; then
-  tail -n 600 "$LOG" >"$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+# ── keep the log from growing forever (B6: trim to KEEP once past MAX) ─────────
+if [[ -f "$LOG" ]] && [[ "$(wc -l <"$LOG" 2>/dev/null || echo 0)" -gt "$MAINT_LOG_MAX" ]]; then
+  # script scope, not a function — `local` is illegal here and prints an error.
+  tmp="$(mktemp "${LOG}.XXXXXX")" && tail -n "$MAINT_LOG_KEEP" "$LOG" >"$tmp" && mv "$tmp" "$LOG"
 fi
 
 log() { echo "$(date '+%F %T')  $*" | tee -a "$LOG"; }
@@ -72,7 +79,17 @@ log "═══════════ dotfiles-maint start ($(uname -s) $(hostn
 
 # ── Homebrew ──────────────────────────────────────────────────────────────────
 if have brew || [[ -x /opt/homebrew/bin/brew || -x /home/linuxbrew/.linuxbrew/bin/brew ]]; then
-  have brew || eval "$([[ -x /opt/homebrew/bin/brew ]] && /opt/homebrew/bin/brew shellenv || /home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+  # Put brew on PATH if a scheduler handed us a minimal env without it. Explicit
+  # if/else (not `A && B || C`): under SC2015 that idiom silently runs C when B
+  # fails, and conflates "test failed" with "shellenv failed" — here we want a
+  # plain Apple-Silicon-else-Linuxbrew branch.
+  if ! have brew; then
+    if [[ -x /opt/homebrew/bin/brew ]]; then
+      eval "$(/opt/homebrew/bin/brew shellenv)"
+    else
+      eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+    fi
+  fi
   step "brew update" _to "$MAINT_BREW_TIMEOUT" brew update
   step "brew upgrade" _to "$MAINT_BREW_TIMEOUT" brew upgrade
   step "brew cleanup" brew cleanup -s
@@ -84,14 +101,52 @@ if have mise; then
   step "mise upgrade" mise upgrade --yes
 fi
 
-# ── zsh plugins (mirrors your zplugin-update: fast-forward pull each repo) ─────
+# ── zsh plugins (mirrors your zplugin-update) ─────────────────────────────────
+# Pin-aware: plugins.zsh now pins each plugin to a commit (detached HEAD). A pinned
+# plugin has NO upstream branch, so `pull --ff-only` would log a false failure every
+# run — and worse, moving it here would float the runtime off its pin. So we only
+# fast-forward plugins that are ON A BRANCH (unpinned); pinned ones are held until a
+# deliberate `make update-plugins` rolls the SHA. `symbolic-ref -q HEAD` succeeds on
+# a branch, fails on a detached (pinned) checkout — the exact discriminator we want.
 if [[ -d "$ZPLUGINDIR" ]]; then
   log "▶ zsh plugins ($ZPLUGINDIR)"
   for d in "$ZPLUGINDIR"/*/; do
     [[ -d "$d/.git" ]] || continue
     name="$(basename "$d")"
-    if git -C "$d" pull --ff-only >>"$LOG" 2>&1; then log "  ✓ ${name}"; else log "  ✗ ${name} (pull failed) — continuing"; fi
+    if ! git -C "$d" symbolic-ref -q HEAD >/dev/null 2>&1; then
+      log "  • ${name} pinned ($(git -C "$d" rev-parse --short HEAD 2>/dev/null)) — held"
+    elif git -C "$d" pull --ff-only >>"$LOG" 2>&1; then log "  ✓ ${name}"; else log "  ✗ ${name} (pull failed) — continuing"; fi
   done
+fi
+
+# ── byte-compile zsh modules + plugins (.zwc) ─────────────────────────────────
+# Mirrors the compile-on-source loop in .zshrc, but pre-warms the cache here so
+# the first shell after a dotfiles/plugin update doesn't pay the compile, AND
+# additionally compiles the (deferred, heavy) plugin sources the .zshrc loop
+# never touches — which is why this runs right AFTER the plugin pull above, so a
+# freshly-updated plugin gets recompiled. Each file is compiled only when its
+# source is newer than its .zwc (or the .zwc is missing); `source`/autoload then
+# load the wordcode and skip re-parsing. zcompile is a zsh builtin, so shell out
+# to zsh (-f: skip rc files; $1: the resolved ZDOTDIR). Failures are non-fatal.
+if have zsh; then
+  ZDOTDIR_RESOLVED="${ZDOTDIR:-$HOME/.config/zsh}"
+  # shellcheck disable=SC2016  # single quotes are intentional: $zd/$f/$1 are
+  # expanded by the INNER `zsh -f -c` (with $1 = ZDOTDIR passed as an arg below),
+  # not by this outer bash. Expanding them here would break the compile loop.
+  step "zsh: byte-compile modules + plugins" zsh -f -c '
+    emulate -L zsh
+    setopt extended_glob null_glob
+    local zd=$1 f
+    local -a targets=(
+      $zd/*.zsh                 # Core modules (what .zshrc sources each shell)
+      $zd/.zcompdump            # completion dump (options.zsh compiles at start; pre-warm)
+      $zd/plugins/**/*.zsh      # plugin sources (heavy; deferred — loop skips these)
+    )
+    for f in $targets; do
+      [[ -f $f ]] || continue
+      [[ -s $f.zwc && ! $f -nt $f.zwc ]] || zcompile -R -- $f 2>/dev/null
+    done
+  ' dotfiles-maint-zcompile "$ZDOTDIR_RESOLVED"
 fi
 
 # ── tmux plugins (TPM) ────────────────────────────────────────────────────────
@@ -103,16 +158,27 @@ fi
 
 # ── Neovim: lazy.nvim sync + treesitter parsers + Mason registry ──────────────
 if have nvim; then
-  # one headless session: Lazy! (bang = synchronous), then TSUpdate, then Mason, then quit.
+  # One headless session: Lazy! sync (bang = synchronous), then update treesitter parsers,
+  # then refresh the Mason registry, then quit.
+  #
+  # TREESITTER (main branch): there is NO :TSUpdateSync — that was a master-branch command, and
+  # `+silent! ...` would have swallowed the "not an editor command" error, so parsers never
+  # updated. On main, update is the async Lua API require('nvim-treesitter').update(); it returns
+  # a task we must :wait() on, or a bare +qa! quits before parsers finish compiling. We update
+  # only the INSTALLED parsers (a no-arg update resolves to 'all' and would try to pull every
+  # parser); require() is pcall-guarded and auto-loads the plugin via lazy's require shim.
   step "neovim: Lazy sync / TSUpdate / MasonUpdate" \
     _to "$MAINT_NVIM_TIMEOUT" nvim --headless \
-    "+Lazy! sync" "+silent! TSUpdateSync" "+silent! MasonUpdate" "+qa!"
+    "+Lazy! sync" \
+    -c 'lua local ok,ts=pcall(require,"nvim-treesitter"); if ok then local p=require("nvim-treesitter.config").get_installed("parsers"); if #p>0 then ts.update(p):wait((tonumber(vim.env.MAINT_TS_TIMEOUT) or 300)*1000) end end' \
+    "+silent! MasonUpdate" "+qa!"
 fi
 
 # ── System packages: refresh the shell-nudge cache (NON-ROOT count) ───────────
 # Distro detection for the Kali / opt-in apply guard below.
 OS_ID=""
 [[ -r /etc/os-release ]] && OS_ID="$(
+  # shellcheck source=/dev/null  # generated system file; nothing to follow at lint time
   . /etc/os-release 2>/dev/null
   echo "$ID"
 )"
