@@ -10,6 +10,7 @@ require("gerrrt.servers.ruff")(capabilities) -- Astral: Python lint diagnostics 
 require("gerrrt.servers.gopls")(capabilities)
 require("gerrrt.servers.jsonls")(capabilities)
 require("gerrrt.servers.ts_ls")(capabilities)
+require("gerrrt.servers.vue_ls")(capabilities) -- Vue/Volar template + styles (ts_ls owns <script>)
 require("gerrrt.servers.bashls")(capabilities)
 require("gerrrt.servers.clangd")(capabilities)
 require("gerrrt.servers.dockerls")(capabilities)
@@ -21,6 +22,7 @@ require("gerrrt.servers.taplo")(capabilities) -- TOML (pyproject/Cargo/foundry/s
 require("gerrrt.servers.marksman")(capabilities) -- Markdown cross-file intelligence
 require("gerrrt.servers.html")(capabilities) -- HTML validation (emmet only expands)
 require("gerrrt.servers.cssls")(capabilities) -- CSS/SCSS/LESS validation
+require("gerrrt.servers.svelte")(capabilities) -- Svelte component intelligence (ts_ls owns <script>)
 
 -- Python: ty (types) + ruff (lint/codeactions) is the Astral stack — pyright intentionally
 -- not enabled. To fall back to pyright, re-add servers/pyright.lua and list it here.
@@ -34,6 +36,7 @@ local wanted = {
 	"gopls",
 	"jsonls",
 	"ts_ls",
+	"vue_ls",
 	"bashls",
 	"clangd",
 	"dockerls",
@@ -45,6 +48,7 @@ local wanted = {
 	"marksman",
 	"html",
 	"cssls",
+	"svelte",
 }
 
 -- Only enable a server whose executable is actually installed. Native vim.lsp.enable()

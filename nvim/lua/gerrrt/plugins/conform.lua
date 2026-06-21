@@ -89,6 +89,8 @@ return {
 				"marksman", -- Markdown
 				"html-lsp", -- HTML validation
 				"css-lsp", -- CSS/SCSS/LESS validation
+				"svelte-language-server", -- Svelte component LSP (you already format/lint svelte)
+				"vue-language-server", -- Vue/Volar LSP (also ships @vue/typescript-plugin for ts_ls)
 				-- ── formatters (conform) ───────────────────────────────────────────────────
 				"stylua",
 				"shfmt",
@@ -97,12 +99,13 @@ return {
 				"prettierd",
 				-- ── linters (nvim-lint) ────────────────────────────────────────────────────
 				"shellcheck",
-				"revive",
+				"golangci-lint", -- Go meta-linter (supersedes revive; richer diagnostics)
 				"eslint_d",
 				"hadolint",
 				"cpplint",
 				"luacheck",
 				"solhint",
+				"stylelint", -- CSS/SCSS/LESS lint (only runs when a project stylelint config exists)
 				"markdownlint-cli2", -- markdown lint (mirrors the repo's markdown gate)
 				"yamllint", -- yaml lint
 			},
