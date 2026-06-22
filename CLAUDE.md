@@ -1,13 +1,13 @@
 # CLAUDE.md — dotfiles-Gentoo
 
 Project memory for Claude Code, auto-loaded every session. For the shared Core
-rules (the "is it Core?" test, the manifest contract, the load order) see
-`core/CLAUDE.md` and `core/CONTRIBUTING.md`.
+rules (the load order, the "is it Core?" test, the manifest contract) see
+`core/README.md` and `core/CONTRIBUTING.md`.
 
 ## What this repo is
 
-`dotfiles-Gentoo` is the **OS-native layer for Gentoo (stamped from the Fedora template)** of a ten-repo, three-layer dotfiles fleet
-(Core → OS-native → Role → Showcase). Source-based — `emerge` **compiles** packages, so expect real build time. **USE flags** gate features at compile time, and package names are full atoms (`category/name`).
+`dotfiles-Gentoo` is the **OS-native layer for Gentoo** in a **nine-repo dotfiles system** built on a three-layer
+model (Core → OS-native → Role). Stamped from the Fedora template (see `core/PORTING-MATRIX.md`). Source-based — `emerge` **compiles** packages, so expect real build time. **USE flags** gate features at compile time, and package names are full atoms (`category/name`).
 
 ## The rule that bites
 
