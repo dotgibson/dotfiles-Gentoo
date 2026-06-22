@@ -244,7 +244,7 @@ trap 'exit 143' TERM
 # core/ subtree — repo-meta and dev tooling. Anything tracked, not matched by the
 # manifest, must appear here (or under a META_PREFIXES dir) or section 1 flags it.
 META_ALLOWLIST=(
-  README.md PORTING-MATRIX.md CONTRIBUTING.md CHANGELOG.md LICENSE SECURITY.md
+  README.md PORTING-MATRIX.md CONTRIBUTING.md CHANGELOG.md LICENSE SECURITY.md aliases.md CLAUDE.md
   core.manifest .gitignore .gitattributes .editorconfig .pre-commit-config.yaml .markdownlint.jsonc .shellcheckrc
   Makefile
   nvim/.luacheckrc
@@ -252,13 +252,17 @@ META_ALLOWLIST=(
 )
 # Directory prefixes whose tracked contents are allowlisted wholesale. scripts/ is
 # this repo's DEV TOOLING (audit/test/bench/sync/update-plugins) — the gate scripts
-# themselves, never vendored into an OS repo (only bin/clip* + the manifest paths
-# are). Listing the dir, not each script, means a new dev tool is covered the moment
-# it lands here — the bin/-vs-scripts/ split is exactly what makes that unambiguous.
-# .claude/ holds the Claude-Code-on-the-web SessionStart hook (provisions the gate
-# toolchain in a remote session) — repo-meta tooling, likewise never vendored out.
+# themselves, NOT shipped Core (absent from core.manifest, so not symlinked by an OS
+# repo's bootstrap; only bin/clip* + the manifest paths are). The subtree copy still
+# carries them physically — "not shipped" means "not in the manifest", not "not on disk".
+# Listing the dir, not each script, means a new dev tool is covered the moment it lands
+# here — the bin/-vs-scripts/ split is exactly what makes that unambiguous.
+# .claude/ holds the Claude-Code config — the SessionStart hook (provisions the gate
+# toolchain in a remote session) plus the maintenance routines (commands/ + agents/
+# for /doc-audit, /tool-scout, /freshness-triage) — repo-meta tooling, not shipped Core
+# (absent from core.manifest).
 # .devcontainer/ is the dev-environment definition (one-command CI parity) — dev tooling
-# too, never part of the vendored Core layer.
+# too, not part of the shipped Core layer (not in core.manifest).
 META_PREFIXES=(examples/ .github/ scripts/ .claude/ .devcontainer/)
 
 # ── 1. manifest <-> filesystem drift ─────────────────────────────────────────
