@@ -3,7 +3,7 @@
 All notable changes to **dotfiles-core** are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-Core is the single source of truth vendored into nine OS repos via
+Core is the single source of truth vendored into eight OS repos via
 `git subtree pull --prefix=core <core-remote> main --squash` (see `scripts/sync-core.sh`).
 Every entry below is therefore a change those repos receive on their next sync —
 this file is the human-readable record of _what_ a sync will bring, complementing
@@ -15,6 +15,24 @@ commit (`git tag -a vX.Y.Z -m vX.Y.Z`).
 
 ### Added
 
+- **`pullall [dir]` shell function** (`zsh/functions.zsh`) — fast-update every git
+  repo under a parent directory in parallel: prunes deleted remote branches,
+  stashes uncommitted tracked changes, switches to each repo's auto-detected trunk
+  (main/master/trunk/… via `origin/HEAD`, not a hard-coded `main`), fast-forwards
+  it, pops the stash back (reporting a pop conflict instead of swallowing it), then
+  prints a summary card. The parent directory is configurable (argument →
+  `$PULLALL_DIR` → CWD) so Core stays machine-agnostic; parallelism via
+  `xargs -P` (`$PULLALL_JOBS`, default 10). Colour is TTY/`NO_COLOR`-aware and
+  repo paths are passed positionally (no shell injection from odd names). Ships
+  with a `_pullall` completion, a `core-help` row, and behavioural tests.
+- **`dotfiles-Defense-PLAN.md`** — a forward-looking architecture note plus a
+  complete, ready-to-instantiate skeleton for a future `dotfiles-Defense` repo
+  (the defensive/blue Role layer that mirrors `dotfiles-Kali`). Records the
+  red/blue split decision, the trigger for standing the repo up, the layer-table
+  identity, and every scaffold file verbatim (README, CLAUDE.md, bootstrap,
+  `defense.zsh`, methodology, gitignore, compose stub, templates) so the repo can
+  be `git init`-ed when the trigger is met. Added to the audit's repo-meta
+  allowlist; it is planning, not shipped Core.
 - **Claude Code project memory + maintenance routines** (`CLAUDE.md`, `.claude/`) —
   a root `CLAUDE.md` encoding the three-layer model, the "is it Core?" test, the
   manifest contract, and the load order so every Claude session reasons from the
@@ -32,11 +50,19 @@ commit (`git tag -a vX.Y.Z -m vX.Y.Z`).
   third-party action, mirroring `freshness.yml`. Auth is a Claude subscription token
   (`CLAUDE_CODE_OAUTH_TOKEN`, from `claude setup-token`); inert until that secret is
   set (the workflow no-ops with a warning otherwise).
+- **`make release-notes` + `cliff.toml`** — git-cliff config + a Makefile target that
+  drafts a GitHub Release body from Conventional Commits since the last release commit.
+  Scoped dev-tooling (audit allowlist, not `core.manifest`, zero runtime cost); it does
+  **not** generate `CHANGELOG.md` (that stays hand-curated and is promoted by
+  `scripts/release.sh`). Surfaced by `/tool-scout` (issue #44).
 - **`aliases.md`** is now surfaced in the changelog — the cross-fleet aliases cheat
   sheet (Core + per-OS + offensive layers), previously shipped without an entry.
 
 ### Fixed
 
+- **`freshness.yml` opens its pin-bump PRs against the default branch**, not the
+  dispatched ref (`GITHUB_REF_NAME`), and uses a ref-independent concurrency group —
+  so a manual run from a feature branch can't target the wrong base or race the cron.
 - **`aliases.md`** — corrected the `myip` expansion (it redirects stderr:
   `curl -fsS https://ifconfig.me 2>/dev/null && echo`) and repo-qualified the
   cross-repo source paths in the header so they don't read as broken local links.
@@ -45,6 +71,11 @@ commit (`git tag -a vX.Y.Z -m vX.Y.Z`).
 - **`audit-core.sh`** — clarified the META-allowlist comments: those files are "not
   shipped Core" (absent from `core.manifest`), not "never vendored" (the subtree copy
   carries them physically).
+- **Doc drift caught by `/doc-audit`** — corrected "vendored into/fans out to _nine_
+  OS repos" → _eight_ (Windows vendors no `core/`) in `CHANGELOG.md` + `CONTRIBUTING.md`;
+  added the manifest-listed `zsh/loader.zsh` and `lazygit/config.yml` to the README
+  Layout tree; completed the README tmux-scripts list (added `tmux-battery`/`tmux-cheat`);
+  and attributed the `cheat` alias to `functions.zsh` (not `aliases.zsh`) in `aliases.md`.
 
 ## [v1.2.0] - 2026-06-21
 
@@ -250,7 +281,7 @@ commit (`git tag -a vX.Y.Z -m vX.Y.Z`).
 - Pinned the seven runtime zsh plugins to commit SHAs (`ZPLUGIN_PINS` in
   `zsh/plugins.zsh`) — the last unpinned link in a toolchain that already pins CI
   linters, pre-commit hooks, and GitHub Actions. An unpinned `master` clone fanned an
-  upstream breaking change — or a compromised tag — out to all nine machines on the
+  upstream breaking change — or a compromised tag — out to all eight machines on the
   next install; installs now fetch exactly the pinned commit.
 
 ### Fixed
@@ -284,6 +315,6 @@ commit (`git tag -a vX.Y.Z -m vX.Y.Z`).
 - Restored non-executable mode (`100644`) on the twelve `zsh/*.zsh` modules. They
   are sourced, not executed, and had regressed to `100755`, failing the audit's
   exec-bit invariant — the exact bug class the audit exists to catch, fanning out
-  to all nine OS repos.
+  to all eight OS repos.
 - Registered `CODEOWNERS`, `dependabot.yml`, and `pull_request_template.md` in the
   audit's `META_ALLOWLIST` so the manifest reverse-drift scan accounts for them.
