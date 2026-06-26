@@ -1,19 +1,22 @@
 # .github/workflows/bootstrap.yml
 # Thin caller for the reusable bootstrap test authored in dotfiles-core. The logic
 # lives there (one place for the whole fleet); this just names Gentoo's container +
-# the deps bootstrap needs. See dotfiles-core/.github/workflows/bootstrap-test.yml.
+# a prep step. See dotfiles-core/.github/workflows/bootstrap-test.yml.
 #
-# prep is a no-op: the stage3 image already ships bash, and installing zsh would mean
-# an emerge source-compile (minutes) — so we skip it. With no zsh, blib_set_login_shell
-# takes its graceful early-return, and --links-only never needs the package layer.
+# prep does NOT install zsh — on Gentoo that's an emerge source-compile (minutes);
+# the stage3 image already ships bash, and with no zsh blib_set_login_shell takes its
+# graceful early-return, which --links-only is fine with. prep's one job here is to
+# guarantee the CI fixture satisfies bootstrap.sh's `ID=gentoo` sanity check: the
+# stage3 image's /etc/os-release doesn't always carry that line, so we ensure it
+# (a real Gentoo box always has it — this only patches the throwaway container).
 name: bootstrap
 
 on:
   pull_request:
-    paths: ['bootstrap.sh', 'core/lib/**', '.github/workflows/bootstrap.yml']
+    paths: ['bootstrap.sh', 'core/**', 'os/**', 'ssh/**', '.github/workflows/bootstrap.yml']
   push:
     branches: [main]
-    paths: ['bootstrap.sh', 'core/lib/**']
+    paths: ['bootstrap.sh', 'core/**', 'os/**', 'ssh/**', '.github/workflows/bootstrap.yml']
   workflow_dispatch:
 
 permissions:
@@ -24,4 +27,4 @@ jobs:
     uses: Gerrrt/dotfiles-core/.github/workflows/bootstrap-test.yml@main
     with:
       image: gentoo/stage3:latest
-      prep: "true"
+      prep: "grep -q '^ID=gentoo' /etc/os-release 2>/dev/null || echo ID=gentoo >> /etc/os-release"
