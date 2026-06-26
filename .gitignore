@@ -7,7 +7,6 @@ zsh/local.zsh
 .env
 .env.*
 !.env.example
-core/nvim/lazy-lock.json
 
 # private SSH material — track ssh/config only, never keys
 ssh/*
