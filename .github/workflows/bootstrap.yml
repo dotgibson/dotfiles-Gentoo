@@ -1,0 +1,27 @@
+# .github/workflows/bootstrap.yml
+# Thin caller for the reusable bootstrap test authored in dotfiles-core. The logic
+# lives there (one place for the whole fleet); this just names Gentoo's container +
+# the deps bootstrap needs. See dotfiles-core/.github/workflows/bootstrap-test.yml.
+#
+# prep is a no-op: the stage3 image already ships bash, and installing zsh would mean
+# an emerge source-compile (minutes) — so we skip it. With no zsh, blib_set_login_shell
+# takes its graceful early-return, and --links-only never needs the package layer.
+name: bootstrap
+
+on:
+  pull_request:
+    paths: ['bootstrap.sh', 'core/lib/**', '.github/workflows/bootstrap.yml']
+  push:
+    branches: [main]
+    paths: ['bootstrap.sh', 'core/lib/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    uses: Gerrrt/dotfiles-core/.github/workflows/bootstrap-test.yml@main
+    with:
+      image: gentoo/stage3:latest
+      prep: "true"
