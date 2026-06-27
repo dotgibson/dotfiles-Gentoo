@@ -15,6 +15,20 @@ commit (`git tag -a vX.Y.Z -m vX.Y.Z`).
 
 ### Changed
 
+- **`bootstrap-lib.sh` gains opt-in dry-run + tallies** (`lib/bootstrap-lib.sh`) — the
+  shared provisioning scaffold now honors `BLIB_DRY=1`: `blib_link` / `blib_seed` /
+  `blib_link_core` / `blib_write_zshrc_loader` / `blib_set_login_shell` PRINT what they
+  would do and change nothing — every mutation (symlink, backup, seed copy, chmod, the tpm
+  clone, the ssh perms, the `.zshrc` write, the `chsh`) is guarded — so an OS bootstrap's
+  `--dry-run` can preview the whole plan instead of each repo hand-rolling it. `blib_link`
+  also gained an idempotent already-correct-link no-op and a missing-source skip; the two
+  inline git/sesh seed blocks are unified into a new `blib_seed`; `BLIB_*` counters +
+  `blib_wire_summary` give a "N linked · M seeded · K backed up" footer. **Backward
+  compatible** — `BLIB_DRY` defaults off and the non-dry path is byte-for-byte the prior
+  behaviour, so the already-adopted Fedora/Arch/Alpine/openSUSE/Gentoo/Kali bootstraps are
+  unaffected. This unblocks MacBook adopting the shared scaffold without losing its
+  `--dry-run`. Verified: dry run creates zero files; a real run wires all 25 links + 2
+  seeds; a re-run backs up nothing.
 - **De-forked `update.zsh`'s per-shell path** (`zsh/update.zsh`) — the throttle check
   and the upgrade nudge ran `date +%s` once and `sed -n Np` twice on **every**
   interactive shell, three subprocess spawns (~1.7 ms each, measured) on the critical
@@ -199,13 +213,12 @@ commit (`git tag -a vX.Y.Z -m vX.Y.Z`).
   manifest comments even spell out their destinations) yet reached no machine,
   inherited from the per-repo bootstraps this library consolidated. lazygit + vim
   symlink like starship; sesh is seeded (copied, never relinked) like the git
-  identity file. The matching `bootstrap-test.yml` assertions for these three are
-  **deferred** until the fix is vendored fleet-wide: that reusable test is referenced
-  `@main` by every adopter, so it must assert only what each adopter's CURRENT
-  vendored `core/` produces — asserting the new wiring before `make sync` propagates
-  it would red-flag repos (Fedora, Kali) that legitimately haven't pulled it yet.
-  Re-add them once the fleet's `core.lock`s have caught up (fleet-drift / freshness
-  report when).
+  identity file. The matching `bootstrap-test.yml` assertions for these three were
+  briefly **deferred** — that reusable test is referenced `@main` by every adopter, so
+  it can only assert what each adopter's CURRENT vendored `core/` produces, and asserting
+  the wiring before `make sync` propagated it would have red-flagged Fedora/Kali. They are
+  **now re-added**: every adopter's `core.lock` is at a Core that includes the wiring, so
+  the `@main` test asserts lazygit/`~/.vimrc`/seeded-sesh again without false reds.
 - **`freshness.yml` opens its pin-bump PRs against the default branch**, not the
   dispatched ref (`GITHUB_REF_NAME`), and uses a ref-independent concurrency group —
   so a manual run from a feature branch can't target the wrong base or race the cron.
@@ -222,6 +235,24 @@ commit (`git tag -a vX.Y.Z -m vX.Y.Z`).
   added the manifest-listed `zsh/loader.zsh` and `lazygit/config.yml` to the README
   Layout tree; completed the README tmux-scripts list (added `tmux-battery`/`tmux-cheat`);
   and attributed the `cheat` alias to `functions.zsh` (not `aliases.zsh`) in `aliases.md`.
+
+### Security
+
+- **CI tool downloads are now SHA-256 verified.** The `setup-core-tools` composite
+  action previously fetched its pinned gate binaries (shellcheck, actionlint, gitleaks,
+  neovim) with `curl … | tar` and **no integrity check** — a tampered or MITM'd release
+  asset would have executed inside the gate. Each install now downloads to a file,
+  verifies it against a pinned hash from `scripts/tool-versions.env`, and only then
+  installs; a mismatch fails the build. `shfmt` was folded into the action (it was the
+  last tool still installed via inline `curl` in the OS-repo lint workflows), so one
+  verified definition now covers every downloaded gate tool.
+- **`scripts/tool-versions.env`** gained a `*_SHA256` per downloaded tool (the single
+  source the action reads alongside each `*_VERSION`), plus `SHFMT_VERSION`.
+- **`scripts/audit-core.sh`** gained a "tool download integrity" section that fails the
+  audit if any pinned `*_VERSION` lacks a 64-hex `*_SHA256` — a version can no longer be
+  bumped without refreshing its checksum.
+- **`scripts/update-tool-checksums.sh`** (new) recomputes the pinned hashes from the
+  exact assets the action downloads, so a version bump is a one-command checksum refresh.
 
 ## [v1.2.0] - 2026-06-21
 
