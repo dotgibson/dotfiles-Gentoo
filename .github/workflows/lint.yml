@@ -18,9 +18,13 @@ name: lint
 #     core/.editorconfig, enforced here via `shfmt -i 2` — there is no repo-root
 #     .editorconfig) so formatting IS evaluated, without failing on existing style.
 #
-# Pinned linter versions come from the vendored Core single source
-# (core/scripts/tool-versions.env), so a Core bump propagates on the next subtree
-# pull instead of drifting per-repo.
+# The gate binaries (shellcheck / shfmt / actionlint) are installed by the SHARED,
+# vendored Core composite action core/.github/actions/setup-core-tools, which
+# downloads each release asset and VERIFIES it against a pinned SHA-256 from
+# core/scripts/tool-versions.env before installing. That single definition replaced
+# this workflow's former inline `curl` blocks (which had no integrity check), so a
+# tampered or MITM'd asset fails the build instead of running in the gate, and a
+# Core pin bump propagates on the next subtree pull instead of drifting per-repo.
 # ──────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -41,11 +45,6 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  # shfmt is intentionally NOT pinned in core/scripts/tool-versions.env (Core does
-  # not gate shfmt), so it stays a literal here — bump deliberately.
-  SHFMT_VERSION: "3.8.0"
-
 jobs:
   shell:
     name: shell lint (shellcheck · shfmt · syntax)
@@ -53,51 +52,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Load pinned tool versions (vendored Core single source)
+      # Load BOTH the pinned versions AND their SHA-256 from the vendored Core single
+      # source into $GITHUB_ENV — the setup-core-tools action reads TOOL_VERSION and
+      # TOOL_SHA256 from the environment to verify each download.
+      - name: Load pinned tool versions + checksums (vendored Core single source)
         run: |
           f=core/scripts/tool-versions.env
           if [ ! -f "$f" ]; then echo "::error::$f missing — is the Core subtree vendored?"; exit 1; fi
-          grep -E '^SHELLCHECK_VERSION=' "$f" >> "$GITHUB_ENV" \
-            || { echo "::error::SHELLCHECK_VERSION not found in $f (renamed upstream?)"; exit 1; }
+          grep -E '^[A-Z0-9_]+=' "$f" >> "$GITHUB_ENV"
 
       - name: Install zsh (for zsh -n on the repo-owned zsh modules)
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zsh
 
-      - name: Cache shellcheck (pinned)
+      # Put the action's install dir on PATH, then restore it from cache if a prior
+      # run already built it (the action no-ops anything already present).
+      - name: Put core-tools bin on PATH
+        run: echo "$HOME/.local/core-tools/bin" >> "$GITHUB_PATH"
+
+      - name: Cache pinned gate tools
         uses: actions/cache@v4
         with:
-          path: /tmp/bin/shellcheck
-          key: shellcheck-${{ env.SHELLCHECK_VERSION }}-linux-x86_64
+          path: ~/.local/core-tools
+          key: core-tools-${{ runner.os }}-shell-${{ hashFiles('core/scripts/tool-versions.env') }}
 
-      - name: Install shellcheck (pinned)
-        run: |
-          if [ ! -x /tmp/bin/shellcheck ]; then
-            mkdir -p /tmp/bin
-            curl -fsSL -o /tmp/sc.tar.xz \
-              "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
-            tar -xJf /tmp/sc.tar.xz -C /tmp "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
-            mv "/tmp/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" /tmp/bin/shellcheck
-            chmod +x /tmp/bin/shellcheck
-          fi
-          sudo install -m 0755 /tmp/bin/shellcheck /usr/local/bin/shellcheck
-          shellcheck --version
-
-      - name: Cache shfmt (pinned)
-        uses: actions/cache@v4
+      # SHA-256-verified install via the shared, vendored Core action — ONE definition
+      # for the whole fleet, replacing this workflow's former inline `curl` blocks.
+      - name: Install pinned gate tools (verified)
+        uses: ./core/.github/actions/setup-core-tools
         with:
-          path: /tmp/bin/shfmt
-          key: shfmt-${{ env.SHFMT_VERSION }}-linux-amd64
-
-      - name: Install shfmt (pinned)
-        run: |
-          if [ ! -x /tmp/bin/shfmt ]; then
-            mkdir -p /tmp/bin
-            curl -fsSL -o /tmp/bin/shfmt \
-              "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64"
-            chmod +x /tmp/bin/shfmt
-          fi
-          sudo install -m 0755 /tmp/bin/shfmt /usr/local/bin/shfmt
-          shfmt --version
+          shellcheck: "true"
+          shfmt: "true"
 
       # ── BLOCKING: real bugs in repo-owned bash/sh. core/ is excluded (gated
       # upstream). Curated excludes mirror the fleet's house style:
@@ -157,28 +141,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Load pinned tool versions (vendored Core single source)
+      - name: Load pinned tool versions + checksums (vendored Core single source)
         run: |
           f=core/scripts/tool-versions.env
           if [ ! -f "$f" ]; then echo "::error::$f missing — is the Core subtree vendored?"; exit 1; fi
-          grep -E '^ACTIONLINT_VERSION=' "$f" >> "$GITHUB_ENV" \
-            || { echo "::error::ACTIONLINT_VERSION not found in $f (renamed upstream?)"; exit 1; }
+          grep -E '^[A-Z0-9_]+=' "$f" >> "$GITHUB_ENV"
 
-      - name: Cache actionlint (pinned)
+      - name: Put core-tools bin on PATH
+        run: echo "$HOME/.local/core-tools/bin" >> "$GITHUB_PATH"
+
+      - name: Cache pinned gate tools
         uses: actions/cache@v4
         with:
-          path: /tmp/bin/actionlint
-          key: actionlint-${{ env.ACTIONLINT_VERSION }}-linux-amd64
+          path: ~/.local/core-tools
+          key: core-tools-${{ runner.os }}-actionlint-${{ hashFiles('core/scripts/tool-versions.env') }}
 
-      - name: Install actionlint (pinned)
-        run: |
-          if [ ! -x /tmp/bin/actionlint ]; then
-            mkdir -p /tmp/bin
-            curl -fsSL -o /tmp/actionlint.tgz \
-              "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
-            tar -xzf /tmp/actionlint.tgz -C /tmp/bin actionlint
-          fi
-          sudo install -m 0755 /tmp/bin/actionlint /usr/local/bin/actionlint
+      - name: Install pinned gate tools (verified)
+        uses: ./core/.github/actions/setup-core-tools
+        with:
+          actionlint: "true"
 
       - name: actionlint
         env:
