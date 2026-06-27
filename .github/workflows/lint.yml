@@ -1,0 +1,188 @@
+name: lint
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Static-analysis gate for this repo's OWN shell — the OS / role layer only.
+#
+# Dotfiles can't be unit-tested, so shellcheck + `bash -n` / `zsh -n` ARE the
+# suite. Three deliberate scoping decisions, all consistent with the rest of the
+# fleet (see this repo's CLAUDE.md and core/README.md):
+#
+#   • The vendored core/ subtree is EXCLUDED. It is a read-only copy of
+#     dotfiles-core gated by ITS OWN CI; a finding there is fixed upstream and
+#     would be a false red here. Every file list below filters ':!:core/**'.
+#   • There is no Lua / StyLua leg: every Lua file lives under core/ (nvim), so a
+#     Lua linter here would only ever lint vendored code this repo can't change.
+#   • shfmt is ADVISORY, not blocking. bootstrap scripts across the fleet use
+#     mixed tab/space styles; hard-gating one would force an out-of-scope
+#     reformat. It still reports drift against a 2-space indent spec (matching
+#     core/.editorconfig, enforced here via `shfmt -i 2` — there is no repo-root
+#     .editorconfig) so formatting IS evaluated, without failing on existing style.
+#
+# Pinned linter versions come from the vendored Core single source
+# (core/scripts/tool-versions.env), so a Core bump propagates on the next subtree
+# pull instead of drifting per-repo.
+# ──────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    branches: [main, master]
+    paths-ignore: ["**.md", "LICENSE"]
+  pull_request:
+    paths-ignore: ["**.md", "LICENSE"]
+
+# One in-flight run per ref: a new push to a PR branch cancels the now-superseded
+# run rather than letting a stale job burn minutes next to the fresh one. (push is
+# scoped to main/master below, so there is no push+pull_request double-trigger to
+# dedupe on a feature-branch PR — this group only collapses successive PR pushes.)
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # shfmt is intentionally NOT pinned in core/scripts/tool-versions.env (Core does
+  # not gate shfmt), so it stays a literal here — bump deliberately.
+  SHFMT_VERSION: "3.8.0"
+
+jobs:
+  shell:
+    name: shell lint (shellcheck · shfmt · syntax)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load pinned tool versions (vendored Core single source)
+        run: |
+          f=core/scripts/tool-versions.env
+          if [ ! -f "$f" ]; then echo "::error::$f missing — is the Core subtree vendored?"; exit 1; fi
+          grep -E '^SHELLCHECK_VERSION=' "$f" >> "$GITHUB_ENV" \
+            || { echo "::error::SHELLCHECK_VERSION not found in $f (renamed upstream?)"; exit 1; }
+
+      - name: Install zsh (for zsh -n on the repo-owned zsh modules)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zsh
+
+      - name: Cache shellcheck (pinned)
+        uses: actions/cache@v4
+        with:
+          path: /tmp/bin/shellcheck
+          key: shellcheck-${{ env.SHELLCHECK_VERSION }}-linux-x86_64
+
+      - name: Install shellcheck (pinned)
+        run: |
+          if [ ! -x /tmp/bin/shellcheck ]; then
+            mkdir -p /tmp/bin
+            curl -fsSL -o /tmp/sc.tar.xz \
+              "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+            tar -xJf /tmp/sc.tar.xz -C /tmp "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
+            mv "/tmp/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" /tmp/bin/shellcheck
+            chmod +x /tmp/bin/shellcheck
+          fi
+          sudo install -m 0755 /tmp/bin/shellcheck /usr/local/bin/shellcheck
+          shellcheck --version
+
+      - name: Cache shfmt (pinned)
+        uses: actions/cache@v4
+        with:
+          path: /tmp/bin/shfmt
+          key: shfmt-${{ env.SHFMT_VERSION }}-linux-amd64
+
+      - name: Install shfmt (pinned)
+        run: |
+          if [ ! -x /tmp/bin/shfmt ]; then
+            mkdir -p /tmp/bin
+            curl -fsSL -o /tmp/bin/shfmt \
+              "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64"
+            chmod +x /tmp/bin/shfmt
+          fi
+          sudo install -m 0755 /tmp/bin/shfmt /usr/local/bin/shfmt
+          shfmt --version
+
+      # ── BLOCKING: real bugs in repo-owned bash/sh. core/ is excluded (gated
+      # upstream). Curated excludes mirror the fleet's house style:
+      #   SC1090/SC1091  runtime `source` targets aren't present in CI
+      #   SC2015         the intentional `cmd && ok || warn` bootstrap idiom (info)
+      #   SC2088         tildes appear only inside human-readable messages, not paths
+      - name: shellcheck (repo-owned bash/sh)
+        env:
+          SHELLCHECK_OPTS: "-e SC1090 -e SC1091 -e SC2015 -e SC2088"
+        run: |
+          mapfile -t files < <(git ls-files '*.sh' ':!:core/**')
+          if [ ${#files[@]} -eq 0 ]; then echo "no repo-owned .sh"; exit 0; fi
+          printf 'shellcheck %s\n' "${files[@]}"
+          shellcheck "${files[@]}"
+
+      # ── BLOCKING: bash parse gate — a broken edit can't ship green.
+      - name: bash -n (syntax, repo-owned bash/sh)
+        run: |
+          mapfile -t files < <(git ls-files '*.sh' ':!:core/**')
+          if [ ${#files[@]} -eq 0 ]; then echo "no repo-owned .sh"; exit 0; fi
+          # Accumulate into rc rather than `bash -n "$f" && echo`: under the runner's
+          # `set -e`, a failing command in a `&&` list is exempt from errexit, so a
+          # parse error in a non-final file would not fail the step. Mirror zsh -n.
+          rc=0
+          for f in "${files[@]}"; do echo "bash -n $f"; bash -n "$f" || rc=1; done
+          exit $rc
+
+      # ── BLOCKING: zsh parse gate. shellcheck/shfmt don't speak zsh, so the
+      # repo-owned zsh modules (os/*.zsh, and Kali's offensive/*.zsh) are gated
+      # with `zsh -n` instead — the same approach Core's CI uses.
+      - name: zsh -n (syntax, repo-owned zsh modules)
+        run: |
+          mapfile -t files < <(git ls-files '*.zsh' ':!:core/**')
+          if [ ${#files[@]} -eq 0 ]; then echo "no repo-owned .zsh"; exit 0; fi
+          rc=0
+          for f in "${files[@]}"; do echo "zsh -n $f"; zsh -n "$f" || rc=1; done
+          exit $rc
+
+      # ── ADVISORY: formatting against a 2-space indent spec (matching
+      # core/.editorconfig), enforced via `shfmt -i 2`. The if/else
+      # below swallows shfmt's drift exit (always ends on an echo → status 0), so
+      # the step is non-blocking WITHOUT continue-on-error — which is deliberately
+      # omitted so a genuinely unexpected failure (e.g. a broken install) still reds.
+      - name: shfmt (format check — advisory)
+        run: |
+          mapfile -t files < <(git ls-files '*.sh' ':!:core/**')
+          if [ ${#files[@]} -eq 0 ]; then echo "no repo-owned .sh"; exit 0; fi
+          if shfmt -i 2 -d "${files[@]}"; then
+            echo "formatting matches the 2-space spec"
+          else
+            echo "::warning::shfmt reported formatting drift (advisory, not blocking). Fix with: shfmt -i 2 -w <file>"
+          fi
+
+  actionlint:
+    name: actionlint (workflow self-check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load pinned tool versions (vendored Core single source)
+        run: |
+          f=core/scripts/tool-versions.env
+          if [ ! -f "$f" ]; then echo "::error::$f missing — is the Core subtree vendored?"; exit 1; fi
+          grep -E '^ACTIONLINT_VERSION=' "$f" >> "$GITHUB_ENV" \
+            || { echo "::error::ACTIONLINT_VERSION not found in $f (renamed upstream?)"; exit 1; }
+
+      - name: Cache actionlint (pinned)
+        uses: actions/cache@v4
+        with:
+          path: /tmp/bin/actionlint
+          key: actionlint-${{ env.ACTIONLINT_VERSION }}-linux-amd64
+
+      - name: Install actionlint (pinned)
+        run: |
+          if [ ! -x /tmp/bin/actionlint ]; then
+            mkdir -p /tmp/bin
+            curl -fsSL -o /tmp/actionlint.tgz \
+              "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+            tar -xzf /tmp/actionlint.tgz -C /tmp/bin actionlint
+          fi
+          sudo install -m 0755 /tmp/bin/actionlint /usr/local/bin/actionlint
+
+      - name: actionlint
+        env:
+          # Same curated excludes as the shell job: actionlint runs shellcheck on
+          # the embedded run-step scripts, and would otherwise re-flag SC2015 etc.
+          SHELLCHECK_OPTS: "-e SC1090 -e SC1091 -e SC2015 -e SC2088"
+        run: actionlint -color
