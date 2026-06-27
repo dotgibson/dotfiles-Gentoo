@@ -15,6 +15,12 @@ commit (`git tag -a vX.Y.Z -m vX.Y.Z`).
 
 ### Changed
 
+- **`/freshness-triage` now covers the CLI tool pins.** The routine reviewed zsh/nvim/
+  actions bumps but said nothing about `scripts/tool-versions.env` — the one bump class
+  that also needs `make update-tool-checksums` to refresh its `*_SHA256`. Added a section
+  so a `*_VERSION` change without its checksum is flagged **Hold** (the audit only checks
+  the hash is _present_, not correct, so a stale hash otherwise fails late at the action's
+  `sha256sum -c` in CI). Routine-doc only; no code change.
 - **Cross-shell keybindings aligned (PARITY.md decisions resolved).** The four open
   parity decisions are settled and implemented on both shells: **Ctrl+T** = file picker
   (zsh moved off `Ctrl+F`), **Ctrl+E** = atuin TUI / **Ctrl+R** = quick fzf history,
@@ -65,6 +71,17 @@ commit (`git tag -a vX.Y.Z -m vX.Y.Z`).
 
 ### Added
 
+- **`bootstrap-lib.sh` gains `--only`/`--skip` module selection** (`lib/bootstrap-lib.sh`)
+  — the shared scaffold can now wire a SUBSET of the Core groups: `zsh nvim tmux git
+  prompt tools`. New `blib_select <--only|--skip> <csv>` (validates a comma-separated
+  selector — empty / leading / trailing / doubled commas and unknown groups all abort),
+  `blib_want <group>` (consulted by `blib_link_core`, `blib_link_os_layer`,
+  `blib_write_zshrc_loader`, `blib_set_login_shell`), and `blib_selected_note` for a
+  summary suffix. Each OS overlay rides with its Core group (`os.zsh`→zsh, `os.conf`→tmux,
+  `os.gitconfig`→git). This is the Core half of the dotfiles-web Bootstrap Command
+  Generator's "Track B"; each OS `bootstrap.sh` just routes its `--only`/`--skip` here.
+  **Backward compatible** — with neither selector set everything is wired exactly as
+  before, so every existing caller is unaffected. `make audit` green.
 - **`gsync` upstream-sync shortcut** (`.bin/sync-upstream.sh`, `zsh/aliases.zsh`) —
   a one-word alias that `git subtree push`es an OS repo's vendored `core/` subtree
   back upstream to dotfiles-core (`main`) — the prefix that matches the registered
