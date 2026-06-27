@@ -71,16 +71,18 @@ jobs:
           mkdir -p "$HOME/.local/core-tools/bin"
           echo "$HOME/.local/core-tools/bin" >> "$GITHUB_PATH"
 
-      # Cache the verified tool dir. The key is per-job (shell vs actionlint) so the two
-      # jobs don't collide on save, but restore-keys shares the prefix so each can warm
-      # from the other's cache (the action no-ops tools already present, installs the rest).
+      # Cache the verified tool dir. The hash precedes the job segment so the restore
+      # prefix below is HASH-SCOPED: the shell + actionlint jobs warm from each other,
+      # but only within the SAME pinned tool set — a tool-versions.env bump changes the
+      # hash, so a stale cache can't be restored (which, since the action skips install
+      # when the binary already exists in bindir, would otherwise pin CI to old tools).
       - name: Cache pinned gate tools
         uses: actions/cache@v4
         with:
           path: ~/.local/core-tools
-          key: core-tools-${{ runner.os }}-shell-${{ hashFiles('core/scripts/tool-versions.env') }}
+          key: core-tools-${{ runner.os }}-${{ hashFiles('core/scripts/tool-versions.env') }}-shell
           restore-keys: |
-            core-tools-${{ runner.os }}-
+            core-tools-${{ runner.os }}-${{ hashFiles('core/scripts/tool-versions.env') }}-
 
       # SHA-256-verified install via the shared, vendored Core action — ONE definition
       # for the whole fleet, replacing this workflow's former inline `curl` blocks.
@@ -100,7 +102,7 @@ jobs:
           for t in shellcheck shfmt; do
             p="$(command -v "$t" || true)"
             echo "$t -> ${p:-<not found>}"
-            [ "$p" = "$bindir/$t" ] || { echo "::error::$t is '$p', not the verified $bindir/$t"; rc=1; }
+            [ "$p" = "$bindir/$t" ] || { echo "::error::$t is '${p:-<not found>}', not the verified $bindir/$t"; rc=1; }
           done
           exit $rc
 
@@ -177,9 +179,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.local/core-tools
-          key: core-tools-${{ runner.os }}-actionlint-${{ hashFiles('core/scripts/tool-versions.env') }}
+          key: core-tools-${{ runner.os }}-${{ hashFiles('core/scripts/tool-versions.env') }}-actionlint
           restore-keys: |
-            core-tools-${{ runner.os }}-
+            core-tools-${{ runner.os }}-${{ hashFiles('core/scripts/tool-versions.env') }}-
 
       - name: Install pinned gate tools (verified)
         uses: ./core/.github/actions/setup-core-tools
@@ -191,7 +193,7 @@ jobs:
           bindir="$HOME/.local/core-tools/bin"
           p="$(command -v actionlint || true)"
           echo "actionlint -> ${p:-<not found>}"
-          [ "$p" = "$bindir/actionlint" ] || { echo "::error::actionlint is '$p', not the verified $bindir/actionlint"; exit 1; }
+          [ "$p" = "$bindir/actionlint" ] || { echo "::error::actionlint is '${p:-<not found>}', not the verified $bindir/actionlint"; exit 1; }
 
       - name: actionlint
         env:
