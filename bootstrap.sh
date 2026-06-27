@@ -11,6 +11,12 @@
 #   ./bootstrap.sh                 # sync + emerge atoms + extras + symlinks
 #   ./bootstrap.sh --no-sync       # skip the (slow) `emerge --sync`
 #   ./bootstrap.sh --links-only    # just (re)create symlinks
+#   ./bootstrap.sh --only zsh,nvim # link ONLY these Core module groups
+#   ./bootstrap.sh --skip tmux     # link everything EXCEPT these groups
+#
+# Module groups (for --only/--skip): zsh nvim tmux git prompt tools — they affect
+# the wiring steps only, never package provisioning; combine with --links-only to
+# re-wire a subset of configs without touching emerge.
 # ──────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -18,19 +24,26 @@ DOTFILES="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}"
 LINKS_ONLY=0
 DO_SYNC=1
+# --only/--skip are validated by the shared lib (blib_select), which is sourced
+# AFTER this loop — so capture the raw values now and apply them below.
+ONLY_RAW="" SKIP_RAW="" ONLY_SEEN=0 SKIP_SEEN=0
 
-for a in "$@"; do case "$a" in
+while [[ $# -gt 0 ]]; do case "$1" in
   --links-only) LINKS_ONLY=1 ;;
   --no-sync) DO_SYNC=0 ;;
+  --only) [[ $# -ge 2 ]] || { echo "--only requires module names, e.g. --only zsh,nvim" >&2; exit 1; }; ONLY_RAW="$2"; ONLY_SEEN=1; shift ;;
+  --only=*) ONLY_RAW="${1#*=}"; ONLY_SEEN=1 ;;
+  --skip) [[ $# -ge 2 ]] || { echo "--skip requires module names, e.g. --skip tmux" >&2; exit 1; }; SKIP_RAW="$2"; SKIP_SEEN=1; shift ;;
+  --skip=*) SKIP_RAW="${1#*=}"; SKIP_SEEN=1 ;;
   -h | --help)
-    sed -n '2,13p' "$0"
+    sed -n '2,19p' "$0"
     exit 0
     ;;
   *)
-    echo "unknown arg: $a" >&2
+    echo "unknown arg: $1" >&2
     exit 1
     ;;
-  esac; done
+  esac; shift; done
 
 # ── core/ subtree present? (inline: can't source a lib out of core/ before this) ─
 # Validate the SPECIFIC paths we depend on (zsh modules + the two libs sourced
@@ -51,6 +64,11 @@ unset _req
 source "$DOTFILES/core/lib/ux.sh"
 # shellcheck source=core/lib/bootstrap-lib.sh
 source "$DOTFILES/core/lib/bootstrap-lib.sh"
+
+# Apply any --only/--skip module selection now the validator (blib_select) exists;
+# it aborts on a malformed selector or an unknown group.
+if ((ONLY_SEEN)); then blib_select --only "$ONLY_RAW"; fi
+if ((SKIP_SEEN)); then blib_select --skip "$SKIP_RAW"; fi
 
 # ── privilege tool: Gentoo's norm is sudo; doas is also common. root => none. ──
 # BLIB_SU hands the same escalator to bootstrap-lib (blib_set_login_shell).
@@ -149,7 +167,7 @@ wire_links() {
   # shellcheck disable=SC2119  # no args is intentional — writes the default module set
   blib_write_zshrc_loader
   blib_set_login_shell
-  blib_ok "symlinks wired"
+  blib_ok "symlinks wired$(blib_selected_note)"
 }
 
 ((LINKS_ONLY)) || provision
