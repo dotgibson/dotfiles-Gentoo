@@ -15,6 +15,17 @@ commit (`git tag -a vX.Y.Z -m vX.Y.Z`).
 
 ### Changed
 
+- **De-forked `update.zsh`'s per-shell path** (`zsh/update.zsh`) — the throttle check
+  and the upgrade nudge ran `date +%s` once and `sed -n Np` twice on **every**
+  interactive shell, three subprocess spawns (~1.7 ms each, measured) on the critical
+  path before the first prompt — the exact fork tax this stack's cached inits + deferred
+  plugins exist to avoid. Replaced with zsh builtins: `$EPOCHSECONDS` (a `zsh/datetime`
+  param) for the clock and `$(<file)` + `${(f)…}` for the two-line cache read, removing
+  all three forks (~5 ms off a warm shell) with byte-identical behaviour and a `date`
+  fallback if the module is unavailable. Profiled with `make profile`; the `_pkgup_*`
+  parse + nudge unit tests are unchanged and green. (A profile-led pivot: caching
+  `tools.zsh`'s `command -v` probes — only ~1.8 ms total, and a stale cache could hide a
+  newly-installed tool — was measured and rejected as not worth the footgun.)
 - **Dropped `dotfiles-Debian` from the documented fleet.** The Debian OS-native
   repo was only ever planned, never created, and is no longer being pursued — so
   the fleet docs that named it as a real target were ahead of reality. Removed it
@@ -28,6 +39,75 @@ commit (`git tag -a vX.Y.Z -m vX.Y.Z`).
 
 ### Added
 
+- **`gsync` upstream-sync shortcut** (`.bin/sync-upstream.sh`, `zsh/aliases.zsh`) —
+  a one-word alias that `git subtree push`es an OS repo's vendored `core/` subtree
+  back upstream to dotfiles-core (`main`) — the prefix that matches the registered
+  `core/` ⇄ root@main subtree boundary. The runner refuses to run unless a `core/`
+  subtree is present (so it no-ops in dotfiles-core, the source of truth) and bails
+  on a dirty working tree. The alias resolves the script relative to the sourced
+  module via the `${(%):-%x}` trick (the same one `maint.zsh` uses), so the
+  shortcut survives the `core/` subtree vendoring without putting `.bin` on `PATH`.
+  Registered in `core.manifest`.
+- **`ARCHITECTURE.md`** — a strategic architecture overview: the three-layer
+  model and its boundary test, the full fleet map (which repos vendor `core/`
+  and which don't), the one-directional subtree vendoring topology, the
+  load-bearing zsh load order, the audit gate, and the rationale for the model.
+  Sits above `README.md`/`CONTRIBUTING.md` (which stay operational) and
+  cross-references them. Added to the audit's repo-meta allowlist; it is docs,
+  not shipped Core.
+- **`parity-check` gate** (`scripts/parity-check.sh`, `make parity-check`, weekly
+  `.github/workflows/parity-check.yml`) — mechanises the `aligned` rows of `PARITY.md`:
+  asserts a distinctive needle (starship/zoxide/atuin init, the fzf tokyonight palette,
+  the `fd` default command) is present in **both** a zsh source and the pwsh source,
+  failing when one side drifts. Reads pwsh from a sibling `dotfiles-Windows` checkout
+  (skipped with a notice if absent, unless `--strict`; the workflow clones it and runs
+  `--strict`), the same cross-repo pattern as `fleet-drift.sh`. The fzf-palette row is
+  the regression guard for the parity fix just shipped; keybinding rows join the checker
+  as each open decision is made. `make audit` green.
+- **`PARITY.md` — the cross-shell parity contract** — the source of truth for what
+  "the same on zsh and PowerShell" means, mapping every prompt/alias/keybinding/
+  function capability to `aligned` (must stay in step), `deliberate` (intentional
+  platform difference), or `gap` (open item). Makes the WSL-zsh ↔ Windows-pwsh
+  divergences a documented decision instead of silent drift, and names the open
+  decisions (the `Ctrl+G` sesh-vs-navi collision, the file-picker key, the atuin
+  key, the `gaf`/`grf`/`grsf` + `Alt+Z` ports). Paired with a same-change fix that
+  brings the **fzf tokyonight-storm palette to pwsh** (`dotfiles-Windows`
+  `powershell/core/10-tools.ps1`), which previously fell back to terminal-default
+  colours — the first `aligned` row closed. A future `scripts/parity-check.sh` can
+  mechanise the `aligned` rows the way `fleet-drift.sh` mechanised provenance.
+- **`core/` edit guard** (`blib_install_core_guard` in `lib/bootstrap-lib.sh`, wired into
+  `scripts/sync-core.sh`) — a local `pre-commit` hook that refuses commits touching the
+  vendored `core/` subtree, turning the prose rule "never hand-edit `core/`" into a
+  mechanical block. Motivated by a real incident: an upstream "Lazy lock update" edited a
+  vendored `core/nvim/lazy-lock.json` directly, drifting it from canonical Core. `sync-core.sh`
+  now (re)installs the hook into every repo it fans out to (so the protection lands on the
+  maintainer's machine, where the edit happens) and exempts its own legitimate subtree
+  writes via `DOTFILES_ALLOW_CORE_EDIT=1`; a one-off bypass is the standard
+  `git commit --no-verify`. Idempotent and non-destructive — it never clobbers a
+  pre-existing unrelated `pre-commit` hook. Covered by hermetic git tests in
+  `scripts/test-core.sh`. (Wiring it into each OS `bootstrap.sh` for fresh clones rides
+  along with the pending `bootstrap-lib.sh` adoption.)
+- **Fleet-drift check** (`scripts/fleet-drift.sh`, `make fleet-drift`, and a weekly
+  `.github/workflows/fleet-drift.yml`) — reads every OS repo's `core.lock`
+  (`core_sha=…`) plus `dotfiles-Windows`'s `nvim/.core-ref` (`commit = …`) and reports
+  which repos lag Core's tip (BEHIND/AHEAD/DIVERGED, quantified in commits). Closes the
+  gap where the per-repo provenance markers existed but nothing compared them, so a repo
+  could silently sit on a stale Core (how the nvim lockfile drifted). Read-only — the
+  fix is a human running `make sync`; a not-checked-out repo is skipped unless `--strict`.
+  The reference commit is `--ref`/`$CORE_REF_SHA` → `origin/main` → `main` → `HEAD`.
+  Fleet list is the same `scripts/os-repos.txt` `sync-core.sh` reads; the scheduled
+  workflow anonymously shallow-clones the public repos and fails red on drift.
+- **`.github/workflows/bootstrap-test.yml`** — a _reusable_ (`workflow_call`)
+  bootstrap integration test, authored once here and called by a thin ~10-line
+  stub in each OS repo, so the OS repos gain CI without each carrying a duplicated
+  copy of the logic (the same fan-out the Core layer exists to kill). Two jobs:
+  `lint` runs `shellcheck -x` + `bash -n` + `--help` on `bootstrap.sh` (the OS
+  repos previously had no CI at all, so this is their first gate); `links-only`
+  runs `bootstrap.sh --links-only` inside the target distro's container and
+  asserts the symlink graph + the generated `~/.zshrc` (it pre-seeds the tpm dir
+  to skip the network clone, mirroring `test-core.sh`'s offline technique, and
+  leaves the actual module load — already covered hermetically by `test-core.sh` —
+  alone). Callers pass `image`/`prep`/`offensive`; Kali sets `offensive: true`.
 - **`lib/bootstrap-lib.sh`** — a vendored BASH provisioning scaffold that ends the
   per-repo bootstrap fan-out. Roughly half of each OS bootstrap.sh was the _same_
   code — `link()`, `read_pkgs()`, WSL detection, the Core-symlink loop, the `.zshrc`
@@ -88,6 +168,44 @@ commit (`git tag -a vX.Y.Z -m vX.Y.Z`).
 
 ### Fixed
 
+- **`gsync` runner + core-guard installer hardening** (review follow-up to the
+  fan-out PRs). `.bin/sync-upstream.sh`: normalize to the git toplevel first so
+  `gsync` works from any subdirectory (it is an absolute-path runner); use
+  `git status --porcelain` for the clean-tree check so untracked files also block
+  (`git diff-index HEAD` missed them); and reword the failure hint to be
+  auth-agnostic (the remote is HTTPS, not SSH) and point at the right re-pull
+  command for an OS repo. `zsh/aliases.zsh`: `gsync` is now a wrapper function,
+  not an alias, so a dotfiles path containing whitespace stays one word and args
+  pass through — with a matching `_gsync` completion and `core-help` row.
+  `lib/bootstrap-lib.sh` `blib_install_core_guard`: detect the git work tree and
+  hooks dir via `git rev-parse` (so worktrees/submodules, where `.git` is a file,
+  get the guard too), skip with a warning when `core.hooksPath` is set (installing
+  into the ignored `.git/hooks` was false protection), and return non-zero instead
+  of silently succeeding if the hooks dir can't be created. New hermetic test
+  covers the `core.hooksPath` skip.
+- **`sync-core.sh` pre-fan-out audit no longer false-fails on the core-guard test.**
+  The script `export`s `DOTFILES_ALLOW_CORE_EDIT=1` for its own legitimate subtree
+  commits, but that exemption was still in the environment when it ran the
+  pre-fan-out `audit-core.sh` — whose behavioral suite commits to a throwaway
+  `core/` and asserts the guard hook BLOCKS it. The inherited exemption made that
+  assertion fail, reding an otherwise-green tree and forcing `SYNC_SKIP_AUDIT=1`.
+  The audit now runs via `env -u DOTFILES_ALLOW_CORE_EDIT` (it never writes to
+  `core/`, so it needs no exemption); the fan-out commits keep theirs.
+- **`bootstrap-lib.sh` now wires three Core files it silently dropped.**
+  `blib_link_core` linked starship/nvim/mise/git/tmux/clip but omitted
+  `core/lazygit/config.yml` (→ `~/.config/lazygit/config.yml`), `core/vim/vimrc`
+  (→ `~/.vimrc`), and the `core/sesh/sesh.toml.example` seed
+  (→ `~/.config/sesh/sesh.toml`) — three files that are in `core.manifest` (the
+  manifest comments even spell out their destinations) yet reached no machine,
+  inherited from the per-repo bootstraps this library consolidated. lazygit + vim
+  symlink like starship; sesh is seeded (copied, never relinked) like the git
+  identity file. The matching `bootstrap-test.yml` assertions for these three are
+  **deferred** until the fix is vendored fleet-wide: that reusable test is referenced
+  `@main` by every adopter, so it must assert only what each adopter's CURRENT
+  vendored `core/` produces — asserting the new wiring before `make sync` propagates
+  it would red-flag repos (Fedora, Kali) that legitimately haven't pulled it yet.
+  Re-add them once the fleet's `core.lock`s have caught up (fleet-drift / freshness
+  report when).
 - **`freshness.yml` opens its pin-bump PRs against the default branch**, not the
   dispatched ref (`GITHUB_REF_NAME`), and uses a ref-independent concurrency group —
   so a manual run from a feature branch can't target the wrong base or race the cron.

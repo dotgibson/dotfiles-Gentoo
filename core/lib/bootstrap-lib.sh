@@ -121,7 +121,12 @@ blib_link_core() {
   # starship prompt theme — symlink to the DEFAULT path (tools.zsh inits starship
   # against ~/.config/starship.toml with no STARSHIP_CONFIG).
   [[ -f "$dotfiles/core/starship/starship.toml" ]] && blib_link "$dotfiles/core/starship/starship.toml" "$config/starship.toml"
+  # lazygit tokyonight theme — DEFAULT path too (reached via the `lg` alias + the
+  # `prefix + g` tmux popup). In core.manifest, so it must wire like starship above.
+  [[ -f "$dotfiles/core/lazygit/config.yml" ]] && blib_link "$dotfiles/core/lazygit/config.yml" "$config/lazygit/config.yml"
   [[ -d "$dotfiles/core/nvim" ]] && blib_link "$dotfiles/core/nvim" "$config/nvim"
+  # stock-vim fallback for boxes with no nvim — core/vim/vimrc -> ~/.vimrc (in the manifest).
+  [[ -f "$dotfiles/core/vim/vimrc" ]] && blib_link "$dotfiles/core/vim/vimrc" "$HOME/.vimrc"
   [[ -f "$dotfiles/core/mise/config.toml" ]] && blib_link "$dotfiles/core/mise/config.toml" "$config/mise/config.toml"
   [[ -f "$dotfiles/core/git/gitconfig" ]] && blib_link "$dotfiles/core/git/gitconfig" "$HOME/.gitconfig"
 
@@ -130,6 +135,14 @@ blib_link_core() {
     mkdir -p "$config/git"
     cp "$dotfiles/core/git/local.gitconfig.example" "$config/git/local.gitconfig"
     blib_say "seeded ~/.config/git/local.gitconfig — FILL IN your name & email"
+  fi
+
+  # portable sesh session config, seeded ONCE (COPIED not symlinked — engagement layouts
+  # live in dotfiles-Kali; in core.manifest as SEEDED to ~/.config/sesh/sesh.toml).
+  if [[ ! -f "$config/sesh/sesh.toml" && -f "$dotfiles/core/sesh/sesh.toml.example" ]]; then
+    mkdir -p "$config/sesh"
+    cp "$dotfiles/core/sesh/sesh.toml.example" "$config/sesh/sesh.toml"
+    blib_say "seeded ~/.config/sesh/sesh.toml — edit freely; not tracked from here"
   fi
 
   # cross-OS helper scripts from Core onto PATH (~/.local/bin).
@@ -258,4 +271,66 @@ blib_set_login_shell() {
   else
     blib_say "chsh not found (install the 'shadow' package) — set it manually with usermod -s $zsh_path $user"
   fi
+}
+
+# ── guard the vendored core/ subtree ──────────────────────────────────────────
+# blib_install_core_guard <repo_root> — install a local pre-commit hook that refuses
+# commits touching the vendored core/ subtree. That tree is overwritten on the next
+# `make sync`, so a hand-edit there is silent drift (exactly how the nvim lockfile
+# diverged). The hook lives in .git/hooks (untracked, per-machine); sync-core.sh
+# (re)installs it on every fan-out, and a bootstrap can call it on a fresh clone.
+# Idempotent: it (re)writes OUR hook but never clobbers a pre-existing unrelated one.
+# Legitimate subtree writes are exempt via $DOTFILES_ALLOW_CORE_EDIT (set by
+# sync-core.sh) or the standard `git commit --no-verify`.
+blib_install_core_guard() {
+  local root="${1:-.}" hooks hook hookspath marker='dotfiles-core-guard'
+  # Ask git, not a literal `.git`-dir test: in worktrees and submodules `.git` is a
+  # FILE, not a directory, so `[[ -d $root/.git ]]` would wrongly skip the install.
+  git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
+    blib_warn "core-guard: $root is not a git working tree — skipped"; return 0; }
+  # A configured core.hooksPath makes git IGNORE the per-repo hooks dir, so writing
+  # into .git/hooks would be a silent no-op (false protection). Warn and skip.
+  hookspath="$(git -C "$root" config --get core.hooksPath 2>/dev/null || true)"
+  if [[ -n "$hookspath" ]]; then
+    blib_warn "core-guard: $root sets core.hooksPath ($hookspath) — skipped; install the guard there yourself"
+    return 0
+  fi
+  # Resolve the real hooks dir (handles worktrees/submodules, where it lives in the
+  # common git dir). --git-path returns a path relative to $root, so absolutize it.
+  hooks="$(git -C "$root" rev-parse --git-path hooks 2>/dev/null)" || {
+    blib_warn "core-guard: $root — could not resolve the git hooks dir — skipped"; return 1; }
+  [[ "$hooks" = /* ]] || hooks="$root/$hooks"
+  hook="$hooks/pre-commit"
+  if [[ -e "$hook" ]] && ! grep -q "$marker" "$hook" 2>/dev/null; then
+    blib_warn "core-guard: $root already has a custom pre-commit hook — left as-is"
+    return 0
+  fi
+  # Surface a failure to create the hooks dir instead of silently returning success
+  # (a returned 0 would leave the guard uninstalled with no signal to the caller).
+  mkdir -p "$hooks" || { blib_warn "core-guard: $root — could not create $hooks — skipped"; return 1; }
+  cat >"$hook" <<'HOOK'
+#!/usr/bin/env bash
+# dotfiles-core-guard — installed by dotfiles-core; do not edit by hand.
+# Refuses commits that modify the vendored core/ subtree, which is OVERWRITTEN on the
+# next `make sync` — so a hand-edit there is silent drift. Edit Core upstream in
+# dotfiles-core instead. Legitimate sync writes set DOTFILES_ALLOW_CORE_EDIT=1; or
+# bypass once with `git commit --no-verify`.
+[ -n "${DOTFILES_ALLOW_CORE_EDIT:-}" ] && exit 0
+# No --diff-filter: catch EVERY staged change under core/ — adds/mods/renames AND
+# deletions (git rm core/…) and type changes, which drift from canonical Core too.
+staged=$(git diff --cached --name-only -- core/ 2>/dev/null) || exit 0
+[ -z "$staged" ] && exit 0
+{
+  printf 'dotfiles-core-guard: refusing to commit edits to the vendored core/ subtree:\n'
+  printf '%s\n' "$staged" | sed 's/^/    /'
+  printf '%s\n' \
+    '' \
+    'core/ is a git-subtree copy of dotfiles-core, overwritten on the next `make sync`.' \
+    'Fix it upstream in dotfiles-core (make audit), then `make sync` to fan it out.' \
+    'Override for a real sync:  DOTFILES_ALLOW_CORE_EDIT=1 git commit …   (or: git commit --no-verify)'
+} >&2
+exit 1
+HOOK
+  chmod +x "$hook"
+  blib_ok "core-guard: pre-commit installed in ${root##*/}"
 }
