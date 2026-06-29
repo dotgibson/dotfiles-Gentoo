@@ -1,4 +1,13 @@
-# dotfiles-Gentoo
+# 🐧 dotfiles-Gentoo
+
+**Gentoo, compiled to taste.** The Gentoo layer (Portage + USE flags) —
+source-based, over the shared core.
+
+`emerge` · `zsh` · `nvim` · `tmux`
+
+[![showcase](https://img.shields.io/badge/showcase-live-7aa2f7?style=flat-square)](https://gerrrt.github.io/dotfiles-web/) ![Gentoo](https://img.shields.io/badge/Gentoo-source-bb9af7?style=flat-square)
+
+---
 
 The **OS-native layer** for Gentoo — the capstone of the set. Core
 (zsh/tmux/nvim/git) is vendored under `core/` from
