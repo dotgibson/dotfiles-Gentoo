@@ -3,16 +3,16 @@
 OS-specific aliases from `os/gentoo.zsh`. See `core/` for the universal alias
 reference (modern CLI, git, safety nets) that applies on every machine.
 
-Gentoo uses `doas` instead of `sudo` — aliased transparently so muscle memory works.
-Package names are full atoms (`category/name`); `emerge` compiles from source, so
-expect real build time. Prefer `dev-lang/rust-bin` over `dev-lang/rust` to avoid
-compiling the Rust toolchain.
+If `doas` is available and `sudo` is absent, an alias is created automatically so
+privilege-escalation muscle memory works without changes. Package names are full atoms
+(`category/name`); `emerge` compiles from source, so expect real build time. Prefer
+`dev-lang/rust-bin` over `dev-lang/rust` to avoid compiling the Rust toolchain.
 
 ## Privilege Escalation
 
-| Alias | Expands To |
-|-------|------------|
-| `sudo` | `doas` (transparent redirect to Gentoo's privilege tool) |
+| Alias | Expands To | Condition |
+|-------|-----------|----------|
+| `sudo` | `doas` | `sudo` not installed and `doas` present |
 
 ## Package Management (emerge / Portage)
 
@@ -32,15 +32,15 @@ compiling the Rust toolchain.
 > **Note on `emsearch`:** If `eix` is installed, it overrides `emerge -s` — `eix`
 > is significantly faster for searching the Portage tree.
 
-## Clipboard / WSL2 / Navigation
+## Clipboard / WSL / Navigation
 
 | Alias | Expands To | Condition |
 |-------|-----------|----------|
 | `pbcopy` | `clip` | clip available |
 | `pbpaste` | `clip-paste` | clip-paste available |
-| `dotsync` | `cd ~/dotfiles-Gentoo` | always |
+| `dotsync` | `cd "$HOME/dotfiles-Gentoo"` | always |
 | `opsignin` | `eval "$(op signin)"` | 1Password CLI |
 | `localip` | `ip -brief -4 addr show scope global` | always |
-| `open` | `explorer.exe` | WSL2 |
-| `xdg-open` | `wslview` | WSL2 + wslview |
-| `cdwin` | `cd "$WINHOME"` | WSL2 + WINHOME set |
+| `open` | `explorer.exe` | WSL |
+| `xdg-open` | `wslview` | WSL + wslview |
+| `cdwin` | `cd "$WINHOME"` | WSL + WINHOME set |
