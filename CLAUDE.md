@@ -11,7 +11,7 @@ model (Core → OS-native → Role). Stamped from the Fedora template (see `core
 
 ## The rule that bites
 
-`core/` is a **vendored `git subtree` copy of [dotfiles-core](https://github.com/Gerrrt/dotfiles-core)** — it
+`core/` is a **vendored `git subtree` copy of [dotfiles-core](https://github.com/dotgibson/dotfiles-core)** — it
 is *not* editable here. Anything you change under `core/` is overwritten on the
 next sync. To change shared Core config, edit it **in dotfiles-core**, run
 `make audit` there, then `make sync` to fan it out to every OS repo.

@@ -56,7 +56,7 @@ jobs:
                 echo "Pull Core, then relink:"
                 echo ""
                 echo '```'
-                echo "git subtree pull --prefix=core https://github.com/Gerrrt/dotfiles-core main --squash"
+                echo "git subtree pull --prefix=core https://github.com/dotgibson/dotfiles-core main --squash"
                 echo "./bootstrap.sh --links-only"
                 echo '```'
               } >> "$GITHUB_STEP_SUMMARY"

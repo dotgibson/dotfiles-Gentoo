@@ -66,7 +66,7 @@ fi
   sed -n 's/^[[:space:]]*git-subtree-split:[[:space:]]*//p' | head -n1)"
 [[ -n "$SPLIT" ]] || skip "check-core-freshness: no core.lock or git-subtree-split marker (not a subtree checkout?)"
 
-UPSTREAM="${CORE_UPSTREAM:-https://github.com/Gerrrt/dotfiles-core}"
+UPSTREAM="${CORE_UPSTREAM:-https://github.com/dotgibson/dotfiles-core}"
 BRANCH="${CORE_BRANCH:-main}"
 
 # Resolve BRANCH to an explicit refs/heads/<branch> so ls-remote can't match a same-named
