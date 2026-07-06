@@ -199,5 +199,5 @@ Project Link: [dotgibson](https://github.com/dotgibson/)
 [gentoo-url]: https://www.gentoo.org
 [portage-shield]: https://img.shields.io/badge/Portage_·_emerge-54487A?style=flat-square
 [portage-url]: https://wiki.gentoo.org/wiki/Portage
-[eix-shield]: https://img.shields.io/badge/eix-425265?style=flat-square
+[eix-shield]: https://img.shields.io/github/v/release/vaeth/eix?style=flat-square&logo=gnometerminal&logoColor=24283B&label=eix&labelColor=BB9AF7&color=3D59A1
 [eix-url]: https://github.com/vaeth/eix
