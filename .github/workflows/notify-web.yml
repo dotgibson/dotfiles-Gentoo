@@ -1,6 +1,6 @@
 # Thin caller for the reusable showcase-refresh dispatch authored in dotfiles-core
 # (.github/workflows/notify-web-call.yml). The owner guard + curl-to-dotfiles-web live
-# there (one definition for every source repo); this just names the trigger and inherits
+# there (one definition for every source repo); this just names the trigger and forwards
 # the secret.
 #
 # Setup: add a fine-grained PAT with "Contents: Read and write" on dotgibson/dotfiles-web
