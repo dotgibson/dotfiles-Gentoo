@@ -133,26 +133,34 @@ guru_install() {
       blib_warn "couldn't enable/sync GURU — skipping its tools (enable later: eselect repository enable guru && emaint sync -r guru)"
     fi
   fi
-  # Only attempt the emerge if GURU is actually available now.
+  # Only attempt the emerge if GURU is actually available now. Reuse the repo's
+  # per-atom-tolerant emerge_install so one masked/keyworded GURU atom (e.g.
+  # app-misc/gum) doesn't stop emerge early and skip the rest.
   if eselect repository list -i 2>/dev/null | grep -qw guru || [[ -d /var/db/repos/guru ]]; then
     blib_say "emerge GURU tools (best-effort): ${atoms[*]}"
-    # shellcheck disable=SC2086  # $SU: single token or empty (root)
-    $SU emerge "${EMERGE_OPTS[@]}" "${atoms[@]}" ||
-      echo "   some GURU atoms skipped (masked/keyworded?) — retry: emerge -p ${atoms[*]}"
+    emerge_install "${atoms[@]}"
   fi
 }
 
 # ── go-install fallback: tools packaged nowhere. Uses the system go, else mise's
 # go, else leaves a copy-paste hint. Always returns 0 (never aborts errexit). ────
+# go install drops binaries in ~/go/bin, which is NOT on the shell PATH (the
+# shell layer prefixes ~/.local/bin and ~/.cargo/bin). Point GOBIN at
+# ~/.local/bin so the tool is actually found after bootstrap.
 _dotfiles_go_install() { # <import-path@version> <binary-name>
+  [ "$#" -ge 2 ] || return 0
   if command -v "$2" >/dev/null 2>&1; then return 0; fi
-  # go install drops binaries in ~/go/bin, which is NOT on the shell PATH (the
-  # shell layer prefixes ~/.local/bin and ~/.cargo/bin). Point GOBIN at
-  # ~/.local/bin so the tool is actually found after bootstrap.
-  local gobin="$HOME/.local/bin"; mkdir -p "$gobin"
-  if command -v go >/dev/null 2>&1; then GOBIN="$gobin" go install "$1" >/dev/null 2>&1 || true
-  elif command -v mise >/dev/null 2>&1; then GOBIN="$gobin" mise exec go@latest -- go install "$1" >/dev/null 2>&1 || true
-  else echo "   $2: needs Go — install later with: GOBIN=$gobin go install $1"; fi
+  local gobin="$HOME/.local/bin"
+  mkdir -p "$gobin" 2>/dev/null || true
+  if command -v go >/dev/null 2>&1; then
+    GOBIN="$gobin" go install "$1" >/dev/null 2>&1 ||
+      echo "   $2: go install failed — retry later: GOBIN=$gobin go install $1"
+  elif command -v mise >/dev/null 2>&1; then
+    GOBIN="$gobin" mise exec go@latest -- go install "$1" >/dev/null 2>&1 ||
+      echo "   $2: go install failed — retry later: GOBIN=$gobin go install $1"
+  else
+    echo "   $2: needs Go — install later with: GOBIN=$gobin go install $1"
+  fi
   return 0
 }
 
