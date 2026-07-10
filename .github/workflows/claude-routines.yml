@@ -1,0 +1,33 @@
+name: claude-routines
+
+# Thin caller for the reusable OS-repo judgment routine authored in dotfiles-core
+# (.github/workflows/claude-routines-call.yml) — one definition for the whole fleet,
+# each OS repo collapsing to this ~10-line caller. The routine (/os-package-availability)
+# audits this repo's install/packages.txt against upstream package availability and
+# core's PORTING-MATRIX.md, then files a deduplicated issue HERE (the caller repo).
+#
+# INERT BY DEFAULT: with no CLAUDE_CODE_OAUTH_TOKEN secret the reusable's preflight gate
+# no-ops with a warning (never a red X). Add the secret (`claude setup-token`) to arm it.
+on:
+  schedule:
+    # Sun 10:00 UTC — a free fleet slot (web is Sat 08:00; core Tue, Defense Wed, htpx
+    # Thu, Kali Fri), staggered 1h off the other OS callers so the fleet never draws on
+    # the Claude subscription at the same time.
+    - cron: "0 10 * * 0"
+  workflow_dispatch:
+
+concurrency:
+  group: claude-routines-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  claude-routines:
+    uses: dotgibson/dotfiles-core/.github/workflows/claude-routines-call.yml@v3
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    with:
+      distro: gentoo
