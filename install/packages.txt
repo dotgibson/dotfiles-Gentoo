@@ -24,6 +24,19 @@ app-misc/tealdeer       # tldr (binary: tldr)
 app-shells/starship     # prompt (IN the main tree — emerge, no installer)
 app-shells/atuin        # shell history (IN the main tree)
 app-misc/yazi           # file manager (IN the main tree)
+sys-block/dust          # du (binary: dust)
+sys-fs/duf              # df
+sys-process/procs       # ps
+net-dns/doggo           # dig / DNS client
+app-misc/yq-go          # yq — mikefarah's GO yq (NOT app-misc/yq, which is the
+                        #   Python yq; core-doctor wants the Go one)
+
+# ── core-doctor extras that are NOT in the main tree ──────────────
+# In the GURU overlay (bootstrap.sh enables GURU + emerges these best-effort):
+#   sys-apps/sd  app-misc/glow  app-misc/gum  net-misc/xh
+#   app-shells/carapace  app-misc/1password-cli (op)
+# Installed via `go install` (not packaged anywhere), handled in bootstrap.sh:
+#   gron  sesh
 
 # ── editor + git workflow ─────────────────────────────────────
 app-editors/neovim
