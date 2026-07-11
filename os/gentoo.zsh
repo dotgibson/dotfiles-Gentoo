@@ -10,12 +10,17 @@
 # ──────────────────────────────────────────────────────────────────────────────
 [[ $- == *i* ]] || return 0
 
-[[ -d "$HOME/.local/bin" ]] && export PATH="$HOME/.local/bin:$PATH"
-[[ -d "$HOME/.cargo/bin"  ]] && export PATH="$HOME/.cargo/bin:$PATH"
+[[ -d "$HOME/.local/bin" && ":$PATH:" != *":$HOME/.local/bin:"* ]] && export PATH="$HOME/.local/bin:$PATH"
+[[ -d "$HOME/.cargo/bin" && ":$PATH:" != *":$HOME/.cargo/bin:"* ]] && export PATH="$HOME/.cargo/bin:$PATH"
 
 _IS_WSL=0
-if [[ -n "${WSL_DISTRO_NAME:-}" ]] || grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null; then
+if [[ -n "${WSL_DISTRO_NAME:-}" ]]; then
   _IS_WSL=1
+elif [[ -r /proc/version ]]; then
+  # zsh reads the file directly (no grep/cat fork) — WSL kernels tag /proc/version.
+  _pv=$(</proc/version)
+  [[ "${_pv:l}" == *microsoft* || "${_pv:l}" == *wsl* ]] && _IS_WSL=1
+  unset _pv
 fi
 
 # doas safety shim if someone built without sudo
