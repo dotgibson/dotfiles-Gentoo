@@ -115,6 +115,55 @@ emerge_install() {
   done
 }
 
+# ── GURU overlay: a handful of core-doctor tools aren't in the main tree but
+# ARE in GURU. Enable GURU (once, best-effort) then emerge them tolerant of
+# failure so a masked/absent atom never aborts the bootstrap. ────────────────────
+guru_install() {
+  local -a atoms=("$@")
+  # Is GURU already known to Portage? (eselect repository list -i, or a repos.conf
+  # entry / synced repo on disk). If not, enable + sync it — all best-effort.
+  if ! eselect repository list -i 2>/dev/null | grep -qw guru &&
+    [[ ! -d /var/db/repos/guru ]]; then
+    blib_say "enabling the GURU overlay (for sd/glow/gum/xh/carapace/op)"
+    # shellcheck disable=SC2086  # $SU: single token or empty (root)
+    if $SU eselect repository enable guru >/dev/null 2>&1 &&
+      $SU emaint sync -r guru >/dev/null 2>&1; then
+      :
+    else
+      blib_warn "couldn't enable/sync GURU — skipping its tools (enable later: eselect repository enable guru && emaint sync -r guru)"
+    fi
+  fi
+  # Only attempt the emerge if GURU is actually available now. Reuse the repo's
+  # per-atom-tolerant emerge_install so one masked/keyworded GURU atom (e.g.
+  # app-misc/gum) doesn't stop emerge early and skip the rest.
+  if eselect repository list -i 2>/dev/null | grep -qw guru || [[ -d /var/db/repos/guru ]]; then
+    blib_say "emerge GURU tools (best-effort): ${atoms[*]}"
+    emerge_install "${atoms[@]}"
+  fi
+}
+
+# ── go-install fallback: tools packaged nowhere. Uses the system go, else mise's
+# go, else leaves a copy-paste hint. Always returns 0 (never aborts errexit). ────
+# go install drops binaries in ~/go/bin, which is NOT on the shell PATH (the
+# shell layer prefixes ~/.local/bin and ~/.cargo/bin). Point GOBIN at
+# ~/.local/bin so the tool is actually found after bootstrap.
+_dotfiles_go_install() { # <import-path@version> <binary-name>
+  [ "$#" -ge 2 ] || return 0
+  if command -v "$2" >/dev/null 2>&1; then return 0; fi
+  local gobin="$HOME/.local/bin"
+  mkdir -p "$gobin" 2>/dev/null || true
+  if command -v go >/dev/null 2>&1; then
+    GOBIN="$gobin" go install "$1" >/dev/null 2>&1 ||
+      echo "   $2: go install failed — retry later: GOBIN=$gobin go install $1"
+  elif command -v mise >/dev/null 2>&1; then
+    GOBIN="$gobin" mise exec go@latest -- go install "$1" >/dev/null 2>&1 ||
+      echo "   $2: go install failed — retry later: GOBIN=$gobin go install $1"
+  else
+    echo "   $2: needs Go — install later with: GOBIN=$gobin go install $1"
+  fi
+  return 0
+}
+
 provision() {
   if ((DO_SYNC)); then
     blib_say "emerge --sync (Portage tree — slow; re-run with --no-sync to skip)"
@@ -156,6 +205,19 @@ provision() {
   fi
   # NOTE: starship / atuin / yazi are emerged from packages.txt on Gentoo (they
   # ARE in the main tree), so unlike the other repos there's no curl installer here.
+
+  # ── core-doctor extras from the GURU overlay (best-effort; never aborts) ──────
+  guru_install \
+    sys-apps/sd \
+    app-misc/glow \
+    app-misc/gum \
+    net-misc/xh \
+    app-shells/carapace \
+    app-misc/1password-cli
+
+  # ── go-install tools (packaged nowhere): gron, sesh ──────────────────────────
+  _dotfiles_go_install github.com/tomnomnom/gron@latest gron
+  _dotfiles_go_install github.com/joshmedeski/sesh/v2@latest sesh
 
   # ── WSL: install /etc/wsl.conf. No systemd=true — Gentoo defaults to OpenRC. ──
   if ((IS_WSL)); then
