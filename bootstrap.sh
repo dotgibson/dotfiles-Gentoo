@@ -209,8 +209,8 @@ provision() {
 
   # ── core-doctor extras from the GURU overlay (best-effort; never aborts) ──────
   # tealdeer / yazi / lazygit / direnv are also GURU-only (not in the main tree),
-  # so they belong here — the packages.txt emerge above runs before GURU is enabled
-  # and would silently skip them.
+  # so they belong here — the packages.txt emerge above runs before GURU is enabled,
+  # so there they'd just fail with a `skipped:` line and never get retried.
   guru_install \
     sys-apps/sd \
     app-misc/glow \

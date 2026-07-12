@@ -32,7 +32,8 @@ app-misc/yq-go          # yq — mikefarah's GO yq (NOT app-misc/yq, which is th
 # ── core-doctor extras that are NOT in the main tree ──────────────
 # In the GURU overlay (bootstrap.sh enables GURU + emerges these best-effort).
 # NOTE: the main-tree emerge above runs BEFORE GURU is enabled, so overlay-only
-# atoms MUST live here, not in the blocks above, or they're silently skipped:
+# atoms MUST live here, not in the blocks above — there they'd fail the pre-GURU
+# emerge (a `skipped: <atom>` line) and never get retried:
 #   sys-apps/sd  app-misc/glow  app-misc/gum  net-misc/xh
 #   app-shells/carapace  app-misc/1password-cli (op)
 #   app-misc/tealdeer  app-misc/yazi  dev-vcs/lazygit  app-shells/direnv
