@@ -20,10 +20,8 @@ app-shells/zoxide       # cd
 app-shells/fzf          # fuzzy finder
 dev-util/git-delta      # git pager / diffs (binary: delta)
 sys-process/btop        # top/htop
-app-misc/tealdeer       # tldr (binary: tldr)
 app-shells/starship     # prompt (IN the main tree — emerge, no installer)
 app-shells/atuin        # shell history (IN the main tree)
-app-misc/yazi           # file manager (IN the main tree)
 sys-block/dust          # du (binary: dust)
 sys-fs/duf              # df
 sys-process/procs       # ps
@@ -32,16 +30,19 @@ app-misc/yq-go          # yq — mikefarah's GO yq (NOT app-misc/yq, which is th
                         #   Python yq; core-doctor wants the Go one)
 
 # ── core-doctor extras that are NOT in the main tree ──────────────
-# In the GURU overlay (bootstrap.sh enables GURU + emerges these best-effort):
+# In the GURU overlay (bootstrap.sh enables GURU + emerges these best-effort).
+# NOTE: the main-tree emerge above runs BEFORE GURU is enabled, so overlay-only
+# atoms MUST live here, not in the blocks above — there they'd fail the pre-GURU
+# emerge (a `skipped: <atom>` line) and never get retried:
 #   sys-apps/sd  app-misc/glow  app-misc/gum  net-misc/xh
 #   app-shells/carapace  app-misc/1password-cli (op)
+#   app-misc/tealdeer  app-misc/yazi  dev-vcs/lazygit  app-shells/direnv
 # Installed via `go install` (not packaged anywhere), handled in bootstrap.sh:
 #   gron  sesh
 
 # ── editor + git workflow ─────────────────────────────────────
 app-editors/neovim
 dev-vcs/git             # `git subtree` ships with git on Gentoo
-dev-vcs/lazygit
 net-misc/openssh        # client + server (Gentoo ships one package)
 
 # ── clipboard ─────────────────────────────────────────────────
@@ -67,4 +68,5 @@ net-misc/curl
 net-misc/wget
 app-misc/jq
 sys-apps/gawk
-dev-util/direnv         # verify atom on your tree if it fails: emerge -s direnv
+# direnv is GURU-only on Gentoo (app-shells/direnv, NOT dev-util/direnv, which
+#   does not exist) → emerged in the guru_install block in bootstrap.sh.
