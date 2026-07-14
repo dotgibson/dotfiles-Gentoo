@@ -223,9 +223,10 @@ provision() {
     dev-vcs/lazygit \
     app-shells/direnv
 
-  # ── go-install tools (packaged nowhere): gron, sesh ──────────────────────────
+  # ── go-install tools (packaged nowhere): gron, sesh, viddy ───────────────────
   _dotfiles_go_install github.com/tomnomnom/gron@latest gron
   _dotfiles_go_install github.com/joshmedeski/sesh/v2@latest sesh
+  _dotfiles_go_install github.com/sachaos/viddy@latest viddy       # watch->viddy (HAVE_VIDDY-guarded)
 
   # ── WSL: install /etc/wsl.conf. No systemd=true — Gentoo defaults to OpenRC. ──
   if ((IS_WSL)); then
