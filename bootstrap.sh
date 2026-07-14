@@ -203,6 +203,13 @@ provision() {
     cargo install --locked tree-sitter-cli >/dev/null 2>&1 ||
       echo "   tree-sitter-cli build failed; retry later: cargo install tree-sitter-cli"
   fi
+  # viddy (watch replacement; Core aliases watch->viddy, HAVE_VIDDY-guarded) is a Rust
+  # CLI, packaged nowhere on Gentoo — build via cargo.
+  if ! command -v viddy >/dev/null && command -v cargo >/dev/null; then
+    blib_say "viddy (cargo build — watch replacement)"
+    cargo install --locked viddy >/dev/null 2>&1 ||
+      echo "   viddy build failed; retry later: cargo install viddy"
+  fi
   # NOTE: starship / atuin are emerged from packages.txt on Gentoo (they ARE in
   # the main tree), so unlike the other repos there's no curl installer here. yazi
   # is NOT in the main tree (GURU-only) — it's emerged in the guru_install block.
