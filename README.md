@@ -128,7 +128,7 @@ prompt — comes from vendored Core; this repo owns the Gentoo specifics:
 
 - `bootstrap.sh` — `emerge` provision + Core/OS symlink wiring (idempotent)
 - `install/packages.txt` — Portage atoms (modern CLI stack)
-- `os/gentoo.zsh` — clipboard + package-manager aliases → `~/.config/zsh/os.zsh`
+- `os/gentoo.zsh` — clipboard + package-manager aliases → `~/.config/zsh/80-os.zsh`
 - `gentoo/package.use.example`, `gentoo/package.accept_keywords.example` — USE-flag and keyword overrides to review and copy to `/etc/portage`
 - `core/` — vendored from `dotfiles-core` (read-only here; edit upstream)
 
