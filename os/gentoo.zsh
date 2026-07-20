@@ -1,6 +1,6 @@
 # dotfiles-Gentoo/os/gentoo.zsh
 # ──────────────────────────────────────────────────────────────────────────────
-# The Gentoo OS-native shell layer. Symlinked to ~/.config/zsh/os.zsh and loaded
+# The Gentoo OS-native shell layer. Symlinked to ~/.config/zsh/80-os.zsh and loaded
 # AFTER Core (tools/aliases/functions). Gentoo/Portage-specific only.
 #
 # No SELinux/AppArmor block (that's a hardened-profile choice, not the default)
