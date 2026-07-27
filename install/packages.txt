@@ -67,6 +67,7 @@ app-portage/eix         # fast package search/index (`eix <term>`)
 net-misc/curl
 net-misc/wget
 app-misc/jq
+www-client/w3m          # terminal web browser (text-mode; renders tables + inline images)
 sys-apps/gawk
 # direnv is GURU-only on Gentoo (app-shells/direnv, NOT dev-util/direnv, which
 #   does not exist) → emerged in the guru_install block in bootstrap.sh.
