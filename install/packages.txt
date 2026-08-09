@@ -39,6 +39,11 @@ app-misc/yq-go          # yq — mikefarah's GO yq (NOT app-misc/yq, which is th
 #   app-misc/tealdeer  app-misc/yazi  dev-vcs/lazygit  app-shells/direnv
 # Installed via `go install` (not packaged anywhere), handled in bootstrap.sh:
 #   gron  sesh
+# Opt-in tools packaged NOWHERE on Gentoo — not in ::gentoo AND not in GURU, so
+# bootstrap.sh does not install them. Grab them by hand if you want them:
+#   jj (jujutsu) → cargo install jujutsu     shfmt → mise use -g shfmt
+# Do NOT add dev-vcs/jujutsu or dev-go/shfmt — neither atom exists (the overlays
+#   that carry shfmt call it dev-util/shfmt, and none of them is GURU).
 
 # ── editor + git workflow ─────────────────────────────────────
 app-editors/neovim
