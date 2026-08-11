@@ -42,9 +42,10 @@ app-misc/yq-go          # yq — mikefarah's GO yq (NOT app-misc/yq, which is th
 # Opt-in tools packaged NOWHERE on Gentoo — not in ::gentoo AND not in GURU, so
 # bootstrap.sh does not install them. Grab them by hand if you want them:
 #   jj (jujutsu) → cargo install --locked jj-cli    shfmt → mise use -g shfmt
-#   NOT `cargo install jujutsu`: that crate is a stub pinned at 0.7.2 whose own
-#   description says "You don't want this crate - you want the jj-cli crate", so it
-#   lands a redirect rather than the VCS. See core/PORTING-MATRIX.md.
+#   The crate is jj-cli, NOT jujutsu: the `jujutsu` crate name is an abandoned stub
+#   (last published 0.7.2) whose description only redirects readers to jj-cli, so
+#   `cargo install jujutsu` gets you the redirect, not the VCS. Detail in
+#   core/PORTING-MATRIX.md, footnote 8 — the canonical source for this.
 # Do NOT add dev-vcs/jujutsu or dev-go/shfmt — neither atom exists (the overlays
 #   that carry shfmt call it dev-util/shfmt, and none of them is GURU).
 
