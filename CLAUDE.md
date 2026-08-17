@@ -6,7 +6,7 @@ rules (the load order, the "is it Core?" test, the manifest contract) see
 
 ## What this repo is
 
-`dotfiles-Gentoo` is the **OS-native layer for Gentoo** in a **ten-repo dotfiles system** built on a three-layer
+`dotfiles-Gentoo` is the **OS-native layer for Gentoo** in an **eleven-repo dotfiles system** built on a three-layer
 model (Core → OS-native → Role). Stamped from the Fedora template (see `core/PORTING-MATRIX.md`). Source-based — `emerge` **compiles** packages, so expect real build time. **USE flags** gate features at compile time, and package names are full atoms (`category/name`).
 
 ## The rule that bites
