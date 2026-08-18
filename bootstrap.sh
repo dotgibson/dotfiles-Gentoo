@@ -267,6 +267,32 @@ if [[ -s /etc/portage/binrepos.conf ]] || ls /etc/portage/binrepos.conf.d/*.conf
   EMERGE_OPTS+=(--getbinpkg=y)
 fi
 
+# _emerge_skip_hint <atom> — say WHICH of the two failures this was.
+#
+# A per-atom emerge failure is one of two unrelated bugs that look identical in
+# the tally, and the old fixed hint only ever described one of them. It blamed a
+# missing keyword and pointed at an ".example" keywords file that had been
+# renamed away long ago — while a phantom GURU atom (gum: no ebuild in ::gentoo
+# or GURU at all) sat in the list for months being neither masked nor keyworded
+# but simply nonexistent, its keyword line already installed and unmasking
+# nothing. check-packages.sh names this trap in its own header: a nonexistent
+# atom "looks exactly like a keyword mask and is never fixed".
+#
+# `emerge -p` needs no privileges, so it deliberately does NOT go through
+# blib_priv — a diagnostic probe must never prompt for a password. It runs only
+# on the failure path, once per already-failed atom, so its dependency
+# resolution is not on the hot path. If emerge is absent or itself fails, the
+# grep simply misses and we fall through to the masked/keyworded branch: that is
+# the commoner cause and its advice is harmless when wrong.
+_emerge_skip_hint() {
+  local a="$1"
+  if emerge -p "$a" 2>&1 | grep -q 'there are no ebuilds to satisfy'; then
+    printf 'no such ebuild in any enabled repo — typo, wrong category, or an overlay that is not enabled'
+  else
+    printf "masked or keyworded — run 'emerge -p %s' for the exact keyword or licence, then add it to gentoo/package.accept_keywords" "$a"
+  fi
+}
+
 # ── resilient emerge: a single masked/keyworded atom aborts the whole set, so
 # bulk first, then one-by-one so the rest still go in. ──────────────────────────
 # A skipped atom is recorded with blib_note_fail (stderr + the end-of-run tally),
@@ -280,7 +306,7 @@ emerge_install() {
   local a
   for a in "${atoms[@]}"; do
     blib_priv emerge "${EMERGE_OPTS[@]}" "$a" ||
-      blib_note_fail "emerge skipped: $a (try 'emerge -p $a' — likely needs a keyword/USE; see gentoo/package.accept_keywords.example)"
+      blib_note_fail "emerge skipped: $a ($(_emerge_skip_hint "$a"))"
   done
 }
 
