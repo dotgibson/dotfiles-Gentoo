@@ -2,9 +2,11 @@
 # Portage ATOMS (category/name) for the modern terminal stack. One per line.
 # mise (not in the tree) and tree-sitter-cli (cargo) are handled by bootstrap.sh.
 #
-# Heads-up: several modern Rust CLIs may be ~amd64 (testing-keyworded) on a
-# stable profile. If an emerge is blocked by keywords/USE, see
-# gentoo/package.accept_keywords.example and gentoo/package.use.example.
+# Heads-up: several modern Rust CLIs are ~amd64 (testing-keyworded) on a stable
+# profile, and two of them (app-shells/zoxide, sys-fs/duf) have NO stable ebuild at
+# all. bootstrap.sh installs gentoo/package.accept_keywords for exactly those, so
+# this list emerges cleanly on stable; --no-portage-config opts out, and
+# gentoo/package.use.example stays a review-and-copy template (USE is your call).
 # Building from source is slow — enable the binhost (--getbinpkg, see README).
 
 # ── shell + multiplexer ───────────────────────────────────────
@@ -71,6 +73,11 @@ dev-python/pip
 # ── Portage helpers (quality of life) ─────────────────────────
 app-portage/gentoolkit  # equery (owns-file), euse, eclean, ...
 app-portage/eix         # fast package search/index (`eix <term>`)
+app-eselect/eselect-repository  # provides `eselect repository`, WITHOUT which the
+                        #   GURU block in bootstrap.sh cannot enable the overlay —
+                        #   and GURU carries ten of the core-doctor tools. A stage3
+                        #   does not ship it, so this was an undeclared dependency
+                        #   of a quarter of the stack.
 
 # ── misc useful ───────────────────────────────────────────────
 net-misc/curl
