@@ -31,6 +31,10 @@ on:
       - 'install/packages.txt'
       - 'gentoo/package.accept_keywords'
       - 'scripts/check-packages.sh'
+      # The workflow itself, same as in pull_request above — without it a
+      # workflow-only change lands on main with no signal, which is the one commit
+      # you most want checked.
+      - '.github/workflows/packages.yml'
   workflow_dispatch:
 
 permissions:
@@ -57,5 +61,10 @@ jobs:
       - name: Fetch a Portage tree snapshot
         run: emerge-webrsync
 
+      # --require-tree: without it the script SKIPS (exit 0) when it finds no synced
+      # tree, which is right for a laptop and exactly wrong here — if
+      # emerge-webrsync ever moves, changes, or half-succeeds, this gate would go
+      # green having validated nothing. That is the same failure this PR fixes in
+      # the bootstrap fixture, so it should not be reintroduced one file over.
       - name: check-packages
-        run: ./scripts/check-packages.sh
+        run: ./scripts/check-packages.sh --require-tree

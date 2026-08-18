@@ -27,12 +27,20 @@
 #                    the line is now dead weight and should be dropped)
 #
 # Usage:
-#   ./scripts/check-packages.sh            # check, exit non-zero on a real problem
-#   ./scripts/check-packages.sh --quiet    # only report problems
+#   ./scripts/check-packages.sh                # check, exit non-zero on a real problem
+#   ./scripts/check-packages.sh --quiet        # only report problems
+#   ./scripts/check-packages.sh --require-tree # a missing tree is FATAL, not a skip
 #
 # Needs a synced ::gentoo tree. Without one it SKIPS (exit 0) with a message
-# rather than failing — so it is safe to run anywhere, and a CI job that wants
-# the check must arrange a tree (emerge-webrsync) deliberately.
+# rather than failing — so it is safe to run anywhere, including a laptop that has
+# never synced.
+#
+# That default is wrong in exactly one place: CI. A gate whose "no tree" path is
+# exit 0 goes GREEN having validated nothing the moment emerge-webrsync moves,
+# changes, or half-succeeds — the same shape as a fixture that manufactures the
+# spelling its check accepts. --require-tree inverts it, so the workflow asserts
+# the invariant using this script's OWN tree resolution rather than duplicating a
+# hard-coded path that could drift from it.
 # ──────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -40,7 +48,22 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PKGS="$HERE/install/packages.txt"
 KEYWORDS="$HERE/gentoo/package.accept_keywords"
 QUIET=0
-[[ "${1:-}" == "--quiet" ]] && QUIET=1
+REQUIRE_TREE=0
+for _arg in "$@"; do
+  case "$_arg" in
+    --quiet) QUIET=1 ;;
+    --require-tree) REQUIRE_TREE=1 ;;
+    -h | --help)
+      sed -n '2,30p' "${BASH_SOURCE[0]}"
+      exit 0
+      ;;
+    *)
+      printf 'unknown arg: %s (valid: --quiet, --require-tree)\n' "$_arg" >&2
+      exit 2
+      ;;
+  esac
+done
+unset _arg
 
 say() { ((QUIET)) || printf '%s\n' "$*"; }
 err() { printf 'FAIL  %s\n' "$*" >&2; }
@@ -55,6 +78,10 @@ if command -v portageq >/dev/null 2>&1; then
 fi
 [[ -n "$TREE" && -d "$TREE" ]] || TREE=/var/db/repos/gentoo
 if [[ ! -d "$TREE/app-shells" ]]; then
+  if ((REQUIRE_TREE)); then
+    err "no synced ::gentoo tree at $TREE, and --require-tree was given — refusing to report success without checking anything"
+    exit 1
+  fi
   say "no synced ::gentoo tree at $TREE — skipping (run emerge --sync, or emerge-webrsync in CI)"
   exit 0
 fi
