@@ -115,8 +115,21 @@ exec zsh
 `core/` is a vendored subtree and is **already present** in a clone — there is no
 submodule step. `bootstrap.sh` is idempotent: it emerges the package list
 (skipping and reporting any keyword-masked atom) and symlinks Core + the Gentoo
-layer into place. Flags: `--no-sync` (skip the slow `emerge --sync` on re-runs),
-`--links-only` (re-link without touching Portage).
+layer into place. Anything best-effort that fails is collected and listed at the
+end of the run rather than scrolling past mid-`emerge`.
+
+| Flag | Effect |
+| --- | --- |
+| `--dry-run` | print the full plan — every package, symlink and rewrite — and change nothing |
+| `--no-sync` | skip the slow `emerge --sync` on re-runs |
+| `--links-only` | re-link configs without touching Portage (needs no privileges) |
+| `--strict` | exit non-zero if any best-effort step failed (use this in CI) |
+| `--only zsh,nvim` | wire ONLY these Core module groups |
+| `--skip tmux` | wire everything EXCEPT these groups |
+
+Module groups are `zsh nvim tmux git prompt tools`; they affect wiring only, never
+package provisioning. Run `./bootstrap.sh --help` for the full usage. On a fresh
+box, `--dry-run` first is cheap and tells you exactly what the run will do.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
