@@ -522,6 +522,23 @@ _user_build_zsh() {
     blib_say "zsh already present — skipping the source build"
     return 0
   fi
+  # DRY must return BEFORE anything below: this function downloads, compiles and
+  # `make install`s into ~/.local, which is the single most invasive thing in user
+  # mode. Note where the bug hid — on a box that ALREADY has zsh the early return
+  # above fires first, so a --dry-run tested on a provisioned machine looks
+  # perfectly well behaved. Only a fresh box would have found it, by having zsh
+  # silently installed by a flag documented as changing nothing.
+  if ((DRY)); then
+    if command -v gcc >/dev/null 2>&1 || command -v cc >/dev/null 2>&1; then
+      blib_say "would build zsh $ZSH_PIN from source into ~/.local (pinned, SHA-256 verified before unpacking)"
+    else
+      # A warning, not blib_note_fail: a preview must not add to the failure tally
+      # the real run reports. Still worth saying loudly — with no compiler this box
+      # cannot get zsh at all, and without zsh no part of Core loads.
+      blib_warn "would NOT be able to build zsh — no C compiler found, and without zsh none of Core loads"
+    fi
+    return 0
+  fi
   if ! command -v gcc >/dev/null 2>&1 && ! command -v cc >/dev/null 2>&1; then
     blib_note_fail "zsh: no C compiler — cannot build it, and without zsh none of Core loads"
     return 0
@@ -543,13 +560,25 @@ _user_build_zsh() {
     make -j"$(nproc 2>/dev/null || echo 2)" >/dev/null 2>&1 || exit 3
     make install >/dev/null 2>&1 || exit 3
   )
+  # KEEP the build tree on a build failure, discard it otherwise. The failure hint
+  # names $workdir so you can go and read config.log or re-run make by hand — which
+  # it previously did while the unconditional rm below deleted that directory a line
+  # later, making the one actionable message in this function a dead end.
+  #
+  # A checksum mismatch is the opposite case: the tarball is untrusted, there is
+  # nothing there worth inspecting, and leaving it invites someone to build it
+  # anyway. That one is removed.
+  local keep=0
   case "$?" in
     0) blib_ok "zsh $ZSH_PIN installed to ~/.local/bin/zsh" ;;
-    2) blib_note_fail "zsh: SHA-256 mismatch on $tarball — REFUSED (expected $ZSH_SHA256). Not a transient failure; do not retry blindly." ;;
-    3) blib_note_fail "zsh: build failed — see if headers are missing (ncurses), then: cd $workdir && ./configure --prefix=\$HOME/.local && make" ;;
+    2) blib_note_fail "zsh: SHA-256 mismatch on $tarball — REFUSED and deleted (expected $ZSH_SHA256). Not a transient failure; do not retry blindly." ;;
+    3)
+      keep=1
+      blib_note_fail "zsh: build failed — the tree is LEFT at $workdir for inspection (start with config.log; missing ncurses headers are the usual cause). Retry: cd $workdir/zsh-${ZSH_PIN} && ./configure --prefix=\$HOME/.local && make && make install"
+      ;;
     *) blib_note_fail "zsh: download or unpack failed — retry later, or build $tarball by hand" ;;
   esac
-  rm -rf "$workdir" 2>/dev/null || true
+  ((keep)) || rm -rf "$workdir" 2>/dev/null || true
   return 0
 }
 
