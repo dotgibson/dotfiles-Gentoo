@@ -296,8 +296,31 @@ _portage_conf_install() { # <src> <portage-subdir>
     blib_note_fail "portage config: $src is missing — skipped"
     return 0
   }
+  # portageq is authoritative: ARCH is Portage's KEYWORD name, which is NOT the
+  # kernel's machine name. `uname -m` says x86_64 where Portage says amd64, and
+  # aarch64 where Portage says arm64 — so the old fallback would have rendered
+  # `~x86_64`, a keyword that matches nothing. The file would install cleanly and
+  # every atom would stay masked: a silent no-op that looks like success.
+  #
+  # Hence: map the handful of known kernel names, and REFUSE to write anything for
+  # an unrecognised one. A wrong keyword file is worse than none, because none at
+  # least fails loudly at the emerge.
   arch="$(portageq envvar ARCH 2>/dev/null || true)"
-  [[ -n "$arch" ]] || arch="$(uname -m)"
+  if [[ -z "$arch" ]]; then
+    case "$(uname -m 2>/dev/null || true)" in
+      x86_64 | amd64) arch=amd64 ;;
+      aarch64 | arm64) arch=arm64 ;;
+      armv7l | armv6l) arch=arm ;;
+      i?86) arch=x86 ;;
+      ppc64le | ppc64) arch=ppc64 ;;
+      riscv64) arch=riscv ;;
+      *)
+        blib_note_fail "portage config: could not determine Portage's ARCH (portageq unavailable, and '$(uname -m 2>/dev/null)' is not a name I map) — skipped ${src##*/}; set it by hand in $dst"
+        return 0
+        ;;
+    esac
+    blib_warn "portageq unavailable — inferred ARCH=$arch from uname; verify with 'portageq envvar ARCH'"
+  fi
   rendered="$(<"$src")"
   rendered="${rendered//__ARCH__/$arch}"
 
@@ -305,7 +328,7 @@ _portage_conf_install() { # <src> <portage-subdir>
   # older) layout — we cannot drop a file inside it. Say so precisely instead of
   # failing with a confusing mkdir error.
   if [[ -f "$dir" && ! -d "$dir" ]]; then
-    blib_note_fail "portage config: $dir is a regular file, not a directory — merge $src into it by hand (or move it to $dir/00-local and re-run)"
+    blib_note_fail "portage config: $dir is a regular file, not a directory — append the contents of $src to it by hand (rendering __ARCH__ as $arch), or convert it: mv $dir $dir.tmp && mkdir $dir && mv $dir.tmp $dir/00-local, then re-run"
     return 0
   fi
 
@@ -328,8 +351,12 @@ _portage_conf_install() { # <src> <portage-subdir>
     return 0
   }
   if [[ -e "$dst" ]]; then
-    blib_priv cp -p "$dst" "$dst.pre-dotfiles.$(date +%s)" ||
-      blib_note_fail "portage config: could not back up $dst — leaving it untouched"
+    # RETURN on a failed backup: writing anyway would destroy the content the
+    # backup exists to preserve, while logging "leaving it untouched".
+    blib_priv cp -p "$dst" "$dst.pre-dotfiles.$(date +%s)" || {
+      blib_note_fail "portage config: could not back up $dst — leaving it untouched (fix the backup, then re-run)"
+      return 0
+    }
   fi
   printf '%s\n' "$rendered" | blib_priv tee "$dst" >/dev/null || {
     blib_note_fail "portage config: could not write $dst"

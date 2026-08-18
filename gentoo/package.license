@@ -19,4 +19,18 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 # 1Password CLI — proprietary; `op` in the doctor's data/net group.
+#
+# `*` rather than the exact licence token, deliberately. Pinning the token is the
+# stricter form and would be preferable — a broad `*` silently accepts a future
+# relicence — but the token is only readable from the ebuild, and this atom lives
+# in GURU, which is not synced until bootstrap.sh enables it. Naming a token that
+# turns out to be wrong is the worse failure: the atom stays licence-masked and the
+# error points at the licence file rather than at the guess in it.
+#
+# What bounds the risk is that this is scoped to ONE atom, not a class: no
+# `*/* *` line, and nothing else in this stack is under a non-free licence. To
+# tighten it once GURU is synced:
+#
+#     equery meta app-misc/1password-cli      # or: grep LICENSE= on the ebuild
+#     # then replace the * below with that token
 app-misc/1password-cli *
