@@ -51,8 +51,8 @@ app-misc/yq-go          # yq — mikefarah's GO yq (NOT app-misc/yq, which is th
 #   The jj crate is jj-cli, NOT jujutsu: the `jujutsu` crate name is an abandoned
 #   stub (last published 0.7.2) whose description only redirects readers to jj-cli,
 #   so `cargo install jujutsu` gets you the redirect, not the VCS. Likewise the
-#   watchexec crate is watchexec-CLI; plain `watchexec` is the library and installs
-#   no binary. core/PORTING-MATRIX.md footnotes 8 and 25 are canonical for both.
+#   watchexec crate is `watchexec-cli` — note the -cli suffix; plain `watchexec` is
+#   the library and installs no binary. core/PORTING-MATRIX.md footnotes 8 and 25 are canonical for both.
 # Do NOT add dev-vcs/jujutsu or dev-go/shfmt — neither atom exists.
 
 # ── editor + git workflow ─────────────────────────────────────
