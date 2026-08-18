@@ -138,9 +138,17 @@ box, `--dry-run` first is cheap and tells you exactly what the run will do.
 
 `emerge` needs privileges. If the account has none — no `sudo`, a locked-down
 work machine, a shared host — `bootstrap.sh --user` installs the whole stack into
-`$HOME` instead, and it is selected **automatically** when there is no way to
-escalate. Aborting would be the wrong answer there: it leaves an unusable box on
-an account that cannot be fixed by re-running with a password.
+`$HOME` instead, and it is selected **automatically** in either of the two ways an
+account can lack them:
+
+- there is no `sudo`/`doas` **binary** at all, or
+- the binary is there and this account cannot use it — `gerrrt is not in the
+  sudoers file`, a mistyped password, or no TTY to prompt on.
+
+The second is the common one, and it used to be a dead end: the escalator resolved
+fine, then authentication failed and the run aborted. Aborting is the wrong answer
+for both, because no amount of re-running fixes an account that will never have
+root. It falls back and says what would change the outcome.
 
 ```sh
 ./bootstrap.sh --user      # or just ./bootstrap.sh — it falls back on its own

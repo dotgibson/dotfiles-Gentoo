@@ -218,10 +218,37 @@ if blib_is_wsl; then IS_WSL=1; fi
 # refresh it in the background until we exit.
 if ((LINKS_ONLY == 0)) && ((DRY == 0)) && ((USER_MODE == 0)); then
   trap 'blib_sudo_keepalive_stop' EXIT
-  blib_sudo_keepalive_start || {
-    blib_warn "sudo authentication failed — aborting before provisioning anything"
-    exit 1
-  }
+  # A FAILED priming is not a reason to abort — it is a reason to fall back.
+  #
+  # blib_resolve_su answers "is there an escalator BINARY", which is a different
+  # question from "can this account actually use it". The gap between those two is
+  # the common case, not the exotic one: a corporate laptop or shared host where
+  # /usr/bin/sudo exists and the account is simply not in sudoers. There, resolve
+  # succeeds, and this priming is the first step that learns the truth:
+  #
+  #   gerrrt is not in the sudoers file.  This incident will be reported.
+  #   ! sudo authentication failed — aborting before provisioning anything
+  #   EXIT=1
+  #
+  # Aborting is the same mistake --user was added to fix, one layer further in: the
+  # operator cannot resolve it by re-running, because there is no password that
+  # would work. So fall back, loudly, and say what would change the outcome.
+  #
+  # This also covers a mistyped password and a run with no TTY. Both are better
+  # served by a $HOME install plus an explanation than by exit 1.
+  #
+  # NB doas: blib_sudo_keepalive_start returns success without priming for anything
+  # that is not sudo (doas has no refreshable timestamp), so an unpermitted doas is
+  # not caught here — it surfaces per-atom through emerge_install's failure tally
+  # instead. Distinguishing "doas needs a password" from "doas will never allow
+  # this" is not something `doas -n` can answer, so guessing would break the
+  # legitimate password prompt for everyone else.
+  if ! blib_sudo_keepalive_start; then
+    blib_warn "could not authenticate with ${BLIB_SU:-the privilege escalator} — falling back to --user (everything into \$HOME, no emerge)"
+    blib_warn "to provision system-wide instead: get this account into sudoers (or the wheel group), then re-run"
+    USER_MODE=1
+    export BLIB_SU=""
+  fi
 fi
 
 # ── emerge options: quiet builds, skip already-installed (idempotent re-runs),
