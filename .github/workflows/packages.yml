@@ -75,6 +75,9 @@ jobs:
       # and no git in the image. It is the mirror this repo's boxes already sync
       # from, so the answer here matches the answer on a provisioned machine.
       - name: Fetch the GURU overlay
+        # Explicit bash: the default `sh -e {0}` only happens to work here because
+        # Gentoo's /bin/sh is bash, and `set -o pipefail` is not POSIX.
+        shell: bash
         run: |
           set -euo pipefail
           mkdir -p /var/db/repos
