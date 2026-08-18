@@ -3,10 +3,13 @@
 *.bak
 *.pre-dotfiles.*
 .DS_Store
-zsh/local.zsh
 .env
 .env.*
 !.env.example
+# NB `zsh/local.zsh` used to be listed here, inherited from the Fedora template.
+# This repo has no zsh/ directory at all — the host-local override lives at
+# ~/.config/zsh/99-local.zsh, outside the repo, and is not something a .gitignore
+# rule here could ever match.
 
 # private SSH material — track ssh/config only, never keys
 ssh/*

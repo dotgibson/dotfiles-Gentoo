@@ -153,7 +153,22 @@ This is an **OS-native layer**, so the contribution rule is a boundary rule:
    it belongs in Core; if it changes with the operator, it belongs in a role repo.
 3. **Green the lint gate.** This repo's CI runs shellcheck + `bash -n` / `zsh -n`
    on the repo-owned shell (the vendored `core/` is excluded — it is gated
-   upstream).
+   upstream). Run it locally first — `make lint` mirrors that gate exactly.
+
+Local checks, so a change is verified before it is pushed:
+
+```sh
+make lint             # shellcheck + bash -n + zsh -n (same files, same opts as CI)
+make check-packages   # every atom exists and installs on a stable profile
+make dry-run          # preview a full bootstrap, change nothing
+make                  # the list
+```
+
+`make check-packages` is the one worth knowing about: it reads a real Portage tree
+and fails if `install/packages.txt` names an atom that does not exist, or names one
+with no stable keyword that `gentoo/package.accept_keywords` does not cover — the
+two mistakes this repo has actually made, both previously caught only by hand and
+written up as a comment warning the next person.
 
 Bugs and ideas: open an
 [issue](https://github.com/dotgibson/dotfiles-Gentoo/issues).
