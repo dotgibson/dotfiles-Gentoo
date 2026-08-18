@@ -50,7 +50,19 @@ else
 fi
 
 # ── conveniences ──────────────────────────────────────────────────────────────
-alias dotsync='cd "$HOME/dotfiles-Gentoo"'
+# Resolve the repo from THIS file rather than assuming a clone path. This layer is
+# reached as ~/.config/zsh/80-os.zsh, a symlink into the repo, so %N gives the path
+# it was sourced as and :A resolves it through the symlink to the real file; two
+# :h strip /os/gentoo.zsh back to the repo root. The old form hard-coded
+# ~/dotfiles-Gentoo and was simply wrong on any box that clones anywhere else —
+# `dotsync` then cd'd nowhere with no hint as to why.
+_gentoo_repo="${${(%):-%N}:A:h:h}"
+if [[ -d "$_gentoo_repo/os" && -f "$_gentoo_repo/bootstrap.sh" ]]; then
+  alias dotsync="cd ${(q)_gentoo_repo}"
+else
+  alias dotsync='cd "$HOME/dotfiles-Gentoo"'   # fallback: the documented clone path
+fi
+unset _gentoo_repo
 command -v op >/dev/null 2>&1 && alias opsignin='eval "$(op signin)"'
 alias localip='ip -brief -4 addr show scope global'
 
@@ -83,7 +95,36 @@ command -v eix >/dev/null 2>&1 && alias emsearch='eix'
 unset _IS_WSL
 
 # ── auto-start/attach tmux for interactive terminals ─────────────────────────
-if command -v tmux >/dev/null 2>&1 \
-   && [[ -z "$TMUX" && -t 1 && "$TERM_PROGRAM" != "vscode" ]]; then
+# This is a POLICY choice, not a Gentoo fact — it belongs to whoever owns the
+# machine, so it is opt-OUT-able and heavily guarded. It stays in this layer for
+# now (moving it to 99-local.zsh would silently turn it off for existing boxes),
+# but note the boundary: nothing here is Portage-specific.
+#
+# The old guard was `-z $TMUX && -t 1 && $TERM_PROGRAM != vscode`, which fires for
+# far more than a human opening a terminal. Every added condition below is a case
+# where attaching a tmux session is actively wrong:
+#
+#   DOTFILES_NO_AUTOTMUX  — the opt-out. There was none.
+#   ZSH_EXECUTION_STRING  — set by `zsh -ic '<cmd>'`. Running ONE command in an
+#                           interactive shell (editors, hooks, agents, and
+#                           `make doctor` in this very repo) would hijack the
+#                           terminal into a session instead of running it.
+#   TERM dumb/linux       — a dumb terminal cannot drive tmux; a bare VT is
+#                           usually a recovery console, where you want a shell.
+#   VSCODE_INJECTION      — VS Code's integrated terminal does not always set
+#                           TERM_PROGRAM, so the original check missed it.
+#   INSIDE_EMACS          — same story for M-x shell / vterm.
+#   CI                    — a CI runner should never attach to anything.
+#
+# TERM_PROGRAM is expanded with :- because it is frequently unset, and an unset
+# parameter is an error under `setopt nounset`.
+if [[ -z "${DOTFILES_NO_AUTOTMUX:-}" \
+   && -z "${TMUX:-}" \
+   && -z "${ZSH_EXECUTION_STRING:-}" \
+   && -z "${VSCODE_INJECTION:-}${INSIDE_EMACS:-}${CI:-}" \
+   && "${TERM_PROGRAM:-}" != "vscode" \
+   && "$TERM" != (dumb|linux) \
+   && -t 1 ]] \
+   && command -v tmux >/dev/null 2>&1; then
   tmux attach -t main 2>/dev/null || tmux new-session -s main
 fi
