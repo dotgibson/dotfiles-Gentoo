@@ -224,6 +224,33 @@ with no stable keyword that `gentoo/package.accept_keywords` does not cover — 
 two mistakes this repo has actually made, both previously caught only by hand and
 written up as a comment warning the next person.
 
+### What gates `main`
+
+`main` is protected by a repository ruleset. Direct pushes are closed; everything
+lands through a PR, which must be up to date with `main` and green on:
+
+| Check | From | What it covers |
+| --- | --- | --- |
+| `guard / integrity` | `core-integrity.yml` | the vendored `core/` tree still matches the Core commit `core.lock` pins |
+| `lint / shell lint (shellcheck · shfmt · syntax)` | `lint.yml` | shellcheck + `bash -n` + `zsh -n` over every repo-owned shell file |
+| `lint / actionlint (workflow self-check)` | `lint.yml` | the workflows themselves |
+| `test / lint`, `test / links-only` | `bootstrap.yml` | `bootstrap.sh` wires a `gentoo/stage3` container end to end |
+
+`make lint` runs the same shell checks locally, with the same file selection and
+options, so you can be green before you push.
+
+Two gates are deliberately **not** required. `packages` (the atom validator)
+fetches a whole Portage tree and has nothing to say about a PR that does not touch
+the package set, so it stays paths-filtered and advisory — and a paths-filtered
+check *cannot* be required, because a check that never runs stays pending and
+blocks the PR forever. CodeQL is left advisory for the same reason: its triggering
+is not ours to guarantee.
+
+Merge commits are kept enabled on purpose. `git subtree pull` writes a merge into
+each `sync/core-*` branch, and that merge is what later subtree pulls compute
+against — squash-only or required-linear-history would flatten it and break Core
+fan-out into this repo.
+
 Bugs and ideas: open an
 [issue](https://github.com/dotgibson/dotfiles-Gentoo/issues).
 
