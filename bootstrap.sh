@@ -136,23 +136,32 @@ fi
 blib_user_bindirs_on_path
 
 # ── sanity: confirm we're on Gentoo ───────────────────────────────────────────
-# SOURCE os-release; do not grep it. Real Gentoo ships the value QUOTED —
+# Read ID out of os-release, tolerating the QUOTING the format permits. Real
+# Gentoo ships the value quoted —
 #
 #   $ grep ^ID= /etc/os-release
 #   ID='gentoo'
 #
-# — so the previous `grep -qiE '^ID=gentoo'` matched nothing and this script
-# refused to run on the one OS it targets. os-release(5) explicitly permits
-# shell-style quoting, which is why the format's contract is "source it", and
-# sourcing also gets the unquoted spelling for free.
+# — so the previous `grep -qiE '^ID=gentoo'` matched nothing, and this script
+# refused to run on the one OS it targets.
 #
-# CI never caught it because bootstrap.yml's prep step appends an UNQUOTED
-# `ID=gentoo` to the container's os-release, manufacturing the one form the old
-# grep accepted. That prep now writes the quoted form a real box has.
+# os-release(5) says the file may be sourced, and `. /etc/os-release` is the
+# conventional read. It is deliberately NOT used here: sourcing executes the file,
+# which is an execution surface this needs nothing from — one scalar field, whose
+# value is a lowercase identifier. Stripping one optional layer of matching quotes
+# is the whole job, so do that and keep the parser inert.
+#
+# CI never caught the original bug because bootstrap.yml's prep step appends an
+# UNQUOTED `ID=gentoo` to the container's os-release, manufacturing the one form
+# the old grep accepted — the gate was green while the script could not start on a
+# real box. Fixing that fixture is a one-line prep change in a follow-up PR (the
+# push token here has no `workflow` scope); until it lands, CI still exercises only
+# the bare spelling, and THIS box is the coverage for the quoted one.
 _os_id=""
 if [[ -r /etc/os-release ]]; then
-  # shellcheck disable=SC1091  # runtime OS metadata, not a repo file
-  _os_id="$(. /etc/os-release 2>/dev/null && printf '%s' "${ID:-}")" || _os_id=""
+  _os_id="$(sed -n 's/^ID=//p' /etc/os-release 2>/dev/null | head -n1)"
+  _os_id="${_os_id%\"}"; _os_id="${_os_id#\"}"   # ID="gentoo"
+  _os_id="${_os_id%\'}"; _os_id="${_os_id#\'}"   # ID='gentoo'
 fi
 _os_id="$(printf '%s' "$_os_id" | tr '[:upper:]' '[:lower:]')"
 if [[ "$_os_id" != gentoo ]]; then
@@ -281,8 +290,13 @@ install_wsl_conf() {
   fi
   if [[ -e /etc/wsl.conf ]]; then
     blib_say "backing up the existing /etc/wsl.conf before rewriting it"
-    blib_priv cp -p /etc/wsl.conf "/etc/wsl.conf.pre-dotfiles.$(date +%s)" ||
-      blib_note_fail "could not back up /etc/wsl.conf — leaving it untouched"
+    # RETURN on a failed backup rather than carrying on. Writing the new file
+    # anyway would destroy the very content the backup exists to preserve, while
+    # logging "leaving it untouched" — a message that would then be a lie.
+    blib_priv cp -p /etc/wsl.conf "/etc/wsl.conf.pre-dotfiles.$(date +%s)" || {
+      blib_note_fail "could not back up /etc/wsl.conf — leaving it untouched (fix the backup, then re-run)"
+      return 0
+    }
   fi
   blib_say "installing /etc/wsl.conf (default user + interop; OpenRC default)"
   printf '%s\n' "$rendered" | blib_priv tee /etc/wsl.conf >/dev/null
@@ -304,7 +318,14 @@ provision() {
   mapfile -t atoms < <(blib_read_pkgs "$pkglist")
 
   if ((DRY)); then
-    blib_say "would ${DO_SYNC:+emerge --sync, then }emerge ${#atoms[@]} atoms from install/packages.txt"
+    # ${DO_SYNC:+…} is WRONG here: :+ tests non-EMPTY, and "0" is non-empty, so
+    # --no-sync still printed "would emerge --sync". Test the value.
+    ((DO_SYNC)) && blib_say "would emerge --sync (Portage tree)"
+    ((DO_SYNC)) || blib_say "--no-sync: would skip emerge --sync"
+    blib_say "would emerge ${#atoms[@]} atoms from install/packages.txt:"
+    # --dry-run promises the full plan, so name them. A count alone cannot tell you
+    # that the atom you just added is being read the way you meant it.
+    ((${#atoms[@]})) && printf '     %s\n' "${atoms[@]}"
     blib_say "would enable the GURU overlay and emerge its tools (best-effort)"
     blib_say "would install mise / tree-sitter-cli / viddy where missing"
     blib_say "would go-install: gron, sesh"
