@@ -34,6 +34,10 @@
 app-shells/zoxide ~__ARCH__
 sys-fs/duf ~__ARCH__
 
+# ── ::gentoo dev/repo tooling, testing-only ───────────────────────────────────
+dev-util/shellcheck ~__ARCH__
+dev-util/difftastic ~__ARCH__
+
 # ── GURU overlay ──────────────────────────────────────────────────────────────
 # GURU ships ebuilds testing-keyworded as a matter of policy, so every atom
 # bootstrap.sh emerges from it needs a line here. These are the core-doctor tools
@@ -48,6 +52,7 @@ app-misc/tealdeer ~__ARCH__
 app-misc/yazi ~__ARCH__
 dev-vcs/lazygit ~__ARCH__
 app-shells/direnv ~__ARCH__
+net-analyzer/gping ~__ARCH__
 
 # NB: an ebuild carrying NO keywords at all (some live/9999 ebuilds, and the
 # occasional GURU package) is not reached by `~arch` — it needs `**`. Nothing here

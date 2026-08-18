@@ -22,6 +22,7 @@ DO_SYNC=1
 STRICT=0
 DRY=0
 PORTAGE_CONFIG=1
+EXTRAS=1
 # --only/--skip are validated by the shared lib (blib_select), which is sourced
 # AFTER this loop — so capture the raw values now and apply them below.
 ONLY_RAW="" SKIP_RAW="" ONLY_SEEN=0 SKIP_SEEN=0
@@ -40,6 +41,7 @@ Usage:
   ./bootstrap.sh --dry-run       # print the full plan, change nothing
   ./bootstrap.sh --strict        # exit non-zero if any best-effort step failed
   ./bootstrap.sh --no-portage-config  # do NOT touch /etc/portage
+  ./bootstrap.sh --no-extras     # skip the opt-in source builds (see below)
   ./bootstrap.sh --only zsh,nvim # link ONLY these Core module groups
   ./bootstrap.sh --skip tmux     # link everything EXCEPT these groups
 
@@ -58,6 +60,11 @@ Gentoo notes:
   • MAKEOPTS is set for the run when your make.conf does not set it — Portage
     otherwise compiles single-threaded, which on a source-based distro is the
     difference between minutes and hours.
+  • Five tools are packaged nowhere on Gentoo and are built with cargo: ouch,
+    ast-grep, jnv, jj, watchexec. Nothing in Core wires them by default (every
+    one is HAVE_*-gated), so --no-extras skips them for a faster first run —
+    at the cost of a ✗ next to each in `core doctor`. The tools Core DOES wire
+    (tree-sitter, viddy, gron, sesh, shfmt) are always installed.
   • A keyword/USE-masked atom is skipped, reported, and never fatal; the run
     ends with a list of everything that did not complete. --strict turns that
     list into a non-zero exit (use it in CI).
@@ -70,6 +77,7 @@ while [[ $# -gt 0 ]]; do case "$1" in
   --dry-run) DRY=1 ;;
   --strict) STRICT=1 ;;
   --no-portage-config) PORTAGE_CONFIG=0 ;;
+  --no-extras) EXTRAS=0 ;;
   --only) [[ $# -ge 2 ]] || {
     echo "--only requires module names, e.g. --only zsh,nvim" >&2
     exit 1
@@ -247,6 +255,30 @@ guru_install() {
     blib_say "emerge GURU tools (best-effort): ${atoms[*]}"
     emerge_install "${atoms[@]}"
   fi
+}
+
+# ── cargo-install fallback: Rust CLIs packaged nowhere on Gentoo ───────────────
+# Same shape as _dotfiles_go_install below: guarded on the binary already existing
+# (which now WORKS, because blib_user_bindirs_on_path put ~/.cargo/bin on PATH —
+# without it every one of these rebuilt from source on every run), never aborts,
+# and records a failure rather than printing one into the scroll.
+#
+# The crate name is NOT always the binary name and getting it wrong is silent:
+# `jj-cli` provides `jj` (the `jujutsu` crate is an abandoned stub that just
+# redirects), and `watchexec-cli` provides `watchexec` (plain `watchexec` is the
+# library — installing it gives you no binary at all). Both are documented in
+# core/PORTING-MATRIX.md, footnotes 8 and 25.
+_dotfiles_cargo_install() { # <crate> <binary-name>
+  [ "$#" -ge 2 ] || return 0
+  if command -v "$2" >/dev/null 2>&1; then return 0; fi
+  if ! command -v cargo >/dev/null 2>&1; then
+    blib_note_fail "$2: needs cargo (dev-lang/rust-bin, in packages.txt) — install later: cargo install --locked $1"
+    return 0
+  fi
+  blib_say "$2 (cargo build — crate: $1)"
+  cargo install --locked "$1" >/dev/null 2>&1 ||
+    blib_note_fail "$2: cargo build failed — retry later: cargo install --locked $1"
+  return 0
 }
 
 # ── go-install fallback: tools packaged nowhere. Uses the system go, else mise's
@@ -475,7 +507,12 @@ provision() {
     ((${#atoms[@]})) && printf '     %s\n' "${atoms[@]}"
     blib_say "would enable the GURU overlay and emerge its tools (best-effort)"
     blib_say "would install mise / tree-sitter-cli / viddy where missing"
-    blib_say "would go-install: gron, sesh"
+    blib_say "would go-install: gron, sesh, shfmt"
+    if ((EXTRAS)); then
+      blib_say "would cargo-build the opt-in set: ouch, ast-grep, jnv, jj, watchexec"
+    else
+      blib_say "--no-extras: would skip ouch / ast-grep / jnv / jj / watchexec"
+    fi
     ((IS_WSL)) && install_wsl_conf
     return 0
   fi
@@ -513,19 +550,10 @@ provision() {
     curl -fsSL https://mise.run | sh >/dev/null 2>&1 ||
       blib_note_fail "mise: installer failed — retry later: curl -fsSL https://mise.run | sh"
   fi
-  # tree-sitter-cli — not packaged; build via cargo (dev-lang/rust-bin provides it).
-  if ! command -v tree-sitter >/dev/null && command -v cargo >/dev/null; then
-    blib_say "tree-sitter-cli (cargo build)"
-    cargo install --locked tree-sitter-cli >/dev/null 2>&1 ||
-      blib_note_fail "tree-sitter-cli: cargo build failed — retry later: cargo install --locked tree-sitter-cli"
-  fi
-  # viddy (watch replacement; Core aliases watch->viddy, HAVE_VIDDY-guarded) is a Rust
-  # CLI, packaged nowhere on Gentoo — build via cargo.
-  if ! command -v viddy >/dev/null && command -v cargo >/dev/null; then
-    blib_say "viddy (cargo build — watch replacement)"
-    cargo install --locked viddy >/dev/null 2>&1 ||
-      blib_note_fail "viddy: cargo build failed — retry later: cargo install --locked viddy"
-  fi
+  # ── cargo builds Core actively WIRES (not optional) ──────────────────────────
+  # tree-sitter-cli backs nvim-treesitter; viddy backs the watch->viddy alias.
+  _dotfiles_cargo_install tree-sitter-cli tree-sitter
+  _dotfiles_cargo_install viddy viddy
   # NOTE: starship / atuin are emerged from packages.txt on Gentoo (they ARE in
   # the main tree), so unlike the other repos there's no curl installer here. yazi
   # is NOT in the main tree (GURU-only) — it's emerged in the guru_install block.
@@ -544,11 +572,31 @@ provision() {
     app-misc/tealdeer \
     app-misc/yazi \
     dev-vcs/lazygit \
-    app-shells/direnv
+    app-shells/direnv \
+    net-analyzer/gping
 
-  # ── go-install tools (packaged nowhere): gron, sesh ──────────────────────────
+  # ── go-install tools (packaged nowhere) ──────────────────────────────────────
+  # gron and sesh are wired by Core (sesh is the Ctrl-G session picker); shfmt backs
+  # nvim's conform formatter and is the one tool in this stack that is absent from
+  # BOTH ::gentoo and GURU (PORTING-MATRIX footnote 7 — there is no dev-go/shfmt
+  # atom, and the overlays that do carry it call it dev-util/shfmt).
   _dotfiles_go_install github.com/tomnomnom/gron@latest gron
   _dotfiles_go_install github.com/joshmedeski/sesh/v2@latest sesh
+  _dotfiles_go_install mvdan.cc/sh/v3/cmd/shfmt@latest shfmt
+
+  # ── opt-in source builds (--no-extras skips these) ───────────────────────────
+  # Packaged nowhere on Gentoo. Every one is HAVE_*-gated in Core, so skipping them
+  # costs nothing but a ✗ in `core doctor` — which is precisely why they were never
+  # installed and the doctor was never clean. jj is additive and never replaces git.
+  if ((EXTRAS)); then
+    _dotfiles_cargo_install ouch ouch
+    _dotfiles_cargo_install ast-grep ast-grep
+    _dotfiles_cargo_install jnv jnv
+    _dotfiles_cargo_install jj-cli jj
+    _dotfiles_cargo_install watchexec-cli watchexec
+  else
+    blib_say "--no-extras: skipping ouch / ast-grep / jnv / jj / watchexec"
+  fi
 
   # ── WSL: install /etc/wsl.conf. No systemd=true — Gentoo defaults to OpenRC. ──
   ((IS_WSL)) && install_wsl_conf
