@@ -9,14 +9,24 @@
 # guarantee the CI fixture satisfies bootstrap.sh's `ID=gentoo` sanity check: the
 # stage3 image's /etc/os-release doesn't always carry that line, so we ensure it
 # (a real Gentoo box always has it — this only patches the throwaway container).
+#
+# It appends the value QUOTED — ID='gentoo' — because that is what a real Gentoo box
+# ships (os-release(5) permits shell quoting, and Gentoo uses it). The previous prep
+# wrote it BARE, which manufactured the one spelling the old `grep -qiE '^ID=gentoo'`
+# check in bootstrap.sh accepted: this gate passed on every run while the script
+# refused to start on actual Gentoo. Keep the quotes — they are the regression guard.
+#
+# NO `paths:` FILTER, deliberately. A required status check that does not run is not
+# "skipped" to a ruleset — it stays PENDING, and the PR is blocked forever. With a
+# paths filter this gate could not be required at all, which is the whole point of
+# having it. Running an extra ~1 min container on a docs-only PR is the cheaper half
+# of that trade.
 name: bootstrap
 
 on:
   pull_request:
-    paths: ['bootstrap.sh', 'core/**', 'os/**', 'ssh/**', '.github/workflows/bootstrap.yml']
   push:
     branches: [main]
-    paths: ['bootstrap.sh', 'core/**', 'os/**', 'ssh/**', '.github/workflows/bootstrap.yml']
   workflow_dispatch:
 
 permissions:
@@ -27,4 +37,4 @@ jobs:
     uses: dotgibson/dotfiles-core/.github/workflows/bootstrap-test.yml@v4
     with:
       image: gentoo/stage3:latest
-      prep: "grep -q '^ID=gentoo' /etc/os-release 2>/dev/null || echo ID=gentoo >> /etc/os-release"
+      prep: "grep -q \"^ID='\\?gentoo\" /etc/os-release 2>/dev/null || echo \"ID='gentoo'\" >> /etc/os-release"
