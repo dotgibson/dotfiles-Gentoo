@@ -1,0 +1,70 @@
+# .github/workflows/packages.yml
+# Gate install/packages.txt against a REAL Portage tree.
+#
+# Not a reusable caller: this check is Gentoo-only by nature (no other repo in the
+# fleet has atoms, keywords or a stable/testing split), so there is nothing to
+# share upstream. The logic lives in scripts/check-packages.sh so it runs the same
+# way locally — `make check-packages`.
+#
+# Cost: emerge-webrsync pulls a tree snapshot (~1-2 min) rather than emerge --sync,
+# which is much slower and needs rsync mirrors.
+#
+# This one KEEPS its paths filter, unlike lint.yml and bootstrap.yml which dropped
+# theirs so they could become required checks. The reasoning is the same rule read
+# the other way: a filtered gate cannot be required (a check that never runs stays
+# PENDING and blocks the PR forever), and this gate should not be required — it
+# fetches a whole Portage tree, and it has nothing to say about a PR that does not
+# touch the package set. Filtered and advisory is the right trade here; unfiltered
+# and required is the right trade there.
+name: packages
+
+on:
+  pull_request:
+    paths:
+      - 'install/packages.txt'
+      - 'gentoo/package.accept_keywords'
+      - 'scripts/check-packages.sh'
+      - '.github/workflows/packages.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'install/packages.txt'
+      - 'gentoo/package.accept_keywords'
+      - 'scripts/check-packages.sh'
+      # The workflow itself, same as in pull_request above — without it a
+      # workflow-only change lands on main with no signal, which is the one commit
+      # you most want checked.
+      - '.github/workflows/packages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  atoms:
+    name: atoms exist and install on stable
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: gentoo/stage3:latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # A stage3 image ships no ::gentoo tree. webrsync fetches a snapshot tarball,
+      # which is the fast path — `emerge --sync` would rsync the whole tree.
+      - name: Fetch a Portage tree snapshot
+        run: emerge-webrsync
+
+      # --require-tree: without it the script SKIPS (exit 0) when it finds no synced
+      # tree, which is right for a laptop and exactly wrong here — if
+      # emerge-webrsync ever moves, changes, or half-succeeds, this gate would go
+      # green having validated nothing. That is the same failure this PR fixes in
+      # the bootstrap fixture, so it should not be reintroduced one file over.
+      - name: check-packages
+        run: ./scripts/check-packages.sh --require-tree
