@@ -44,7 +44,6 @@ dev-util/difftastic ~__ARCH__
 # absent from the main tree (see PORTING-MATRIX.md footnote 12).
 sys-apps/sd ~__ARCH__
 app-misc/glow ~__ARCH__
-app-misc/gum ~__ARCH__
 net-misc/xh ~__ARCH__
 app-shells/carapace ~__ARCH__
 app-misc/1password-cli ~__ARCH__

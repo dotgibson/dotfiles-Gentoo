@@ -36,10 +36,16 @@ app-misc/yq-go          # yq — mikefarah's GO yq (NOT app-misc/yq, which is th
 # NOTE: the main-tree emerge above runs BEFORE GURU is enabled, so overlay-only
 # atoms MUST live here, not in the blocks above — there they'd fail the pre-GURU
 # emerge (a `skipped: <atom>` line) and never get retried:
-#   sys-apps/sd  app-misc/glow  app-misc/gum  net-misc/xh
+#   sys-apps/sd  app-misc/glow  net-misc/xh
 #   app-shells/carapace  app-misc/1password-cli (op)
 #   app-misc/tealdeer  app-misc/yazi  dev-vcs/lazygit  app-shells/direnv
 #   net-analyzer/gping
+# Provided by mise (gentoo/mise-tools.toml), NOT emerged:
+#   gum
+#   Do NOT add app-misc/gum back: no such ebuild exists in ::gentoo OR in GURU,
+#   so it can only ever emerge as a `skipped:` line — which reads like a keyword
+#   mask and gets "fixed" with an accept_keywords entry that unmasks nothing.
+#   That is exactly how it survived in the guru_install list; mise owns gum.
 # Installed via `go install` (not packaged anywhere), handled in bootstrap.sh:
 #   gron  sesh  shfmt
 #   shfmt is absent from BOTH ::gentoo and GURU (PORTING-MATRIX footnote 7): there
