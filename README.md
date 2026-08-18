@@ -146,9 +146,14 @@ account can lack them:
   sudoers file`, a mistyped password, or no TTY to prompt on.
 
 The second is the common one, and it used to be a dead end: the escalator resolved
-fine, then authentication failed and the run aborted. Aborting is the wrong answer
-for both, because no amount of re-running fixes an account that will never have
-root. It falls back and says what would change the outcome.
+fine, then authentication failed and the run aborted with nothing installed.
+
+Only one of those causes is irrecoverable — an account that is genuinely not in
+sudoers, where no password would work. A mistyped password or a run with no
+terminal to prompt on **is** fixable by re-running. Falling back suits all three:
+the recoverable cases get a working `$HOME` install now and a system-wide one
+whenever they re-run, rather than `exit 1` and nothing. The warning names all
+three, so nobody goes hunting for a permissions problem they do not have.
 
 ```sh
 ./bootstrap.sh --user      # or just ./bootstrap.sh — it falls back on its own

@@ -230,12 +230,21 @@ if ((LINKS_ONLY == 0)) && ((DRY == 0)) && ((USER_MODE == 0)); then
   #   ! sudo authentication failed — aborting before provisioning anything
   #   EXIT=1
   #
-  # Aborting is the same mistake --user was added to fix, one layer further in: the
-  # operator cannot resolve it by re-running, because there is no password that
-  # would work. So fall back, loudly, and say what would change the outcome.
+  # Three different situations reach this branch, and they are NOT equally
+  # recoverable — which is why the message below names all of them rather than
+  # assuming the first:
   #
-  # This also covers a mistyped password and a run with no TTY. Both are better
-  # served by a $HOME install plus an explanation than by exit 1.
+  #   not in sudoers   irrecoverable here. No password would work, so aborting is
+  #                    the same mistake --user was added to fix, one layer in: the
+  #                    operator cannot resolve it by re-running.
+  #   wrong password   recoverable — re-run and type it correctly.
+  #   no TTY to        recoverable — re-run from a terminal. Common in automation,
+  #   prompt on        and the one most likely to surprise someone with full sudo.
+  #
+  # Falling back suits all three: the recoverable two get a working $HOME install
+  # now and a system-wide one whenever they re-run, instead of exit 1 and nothing.
+  # But a message that only mentions sudoers would send the other two hunting for a
+  # permissions problem they do not have.
   #
   # NB doas: blib_sudo_keepalive_start returns success without priming for anything
   # that is not sudo (doas has no refreshable timestamp), so an unpermitted doas is
@@ -245,7 +254,7 @@ if ((LINKS_ONLY == 0)) && ((DRY == 0)) && ((USER_MODE == 0)); then
   # legitimate password prompt for everyone else.
   if ! blib_sudo_keepalive_start; then
     blib_warn "could not authenticate with ${BLIB_SU:-the privilege escalator} — falling back to --user (everything into \$HOME, no emerge)"
-    blib_warn "to provision system-wide instead: get this account into sudoers (or the wheel group), then re-run"
+    blib_warn "to provision system-wide instead, re-run from a terminal with a correct password — or, if this account is genuinely not in sudoers, add it (the wheel group) first"
     USER_MODE=1
     export BLIB_SU=""
   fi
