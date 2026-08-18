@@ -231,11 +231,21 @@ make dry-run          # preview a full bootstrap, change nothing
 make                  # the list
 ```
 
-`make check-packages` is the one worth knowing about: it reads a real Portage tree
+`make check-packages` is the one worth knowing about: it reads real Portage trees
 and fails if `install/packages.txt` names an atom that does not exist, or names one
 with no stable keyword that `gentoo/package.accept_keywords` does not cover — the
 two mistakes this repo has actually made, both previously caught only by hand and
 written up as a comment warning the next person.
+
+It also reads the `guru_install` list out of `bootstrap.sh` and checks it the same
+way against the GURU overlay, because a third mistake got made in the one place the
+first two checks could not see: `app-misc/gum` sat in that list for months with no
+ebuild in either tree, failing every run, while the `accept_keywords` line we
+shipped for it made the tally's "needs a keyword" advice look already taken. So the
+gate now also rejects a keyword line whose atom exists in neither tree — the line
+that unmasks nothing is what hid the phantom atom. Sync GURU (`eselect repository
+enable guru && emaint sync -r guru`) or point `GURU_TREE` at a checkout; without one
+those checks announce that they skipped rather than passing quietly.
 
 ### What gates `main`
 

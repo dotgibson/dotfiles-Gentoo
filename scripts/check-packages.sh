@@ -15,6 +15,11 @@
 #   • app-shells/zoxide and sys-fs/duf have NO stable ebuild, so on a stable
 #     profile they cannot install at all — which is invisible until a fresh box
 #     finishes "complete" without them.
+#   • app-misc/gum sat in bootstrap.sh's guru_install list for months with no
+#     ebuild in ::gentoo OR GURU, failing every single run — and we shipped an
+#     accept_keywords line for it, so the file you were told to check already had
+#     the entry you were told to add. Checks 1-4 could not see any of it: they
+#     read install/packages.txt, and the GURU list is hard-coded in bootstrap.sh.
 #
 # A comment cannot fail a build. This can.
 #
@@ -25,11 +30,21 @@
 #                    gentoo/package.accept_keywords (else a stable profile skips it)
 #   4. staleness   — an accept_keywords entry whose atom HAS gone stable (advisory:
 #                    the line is now dead weight and should be dropped)
+#   5. GURU list   — every atom bootstrap.sh emerges from GURU exists in GURU (or
+#                    has graduated to ::gentoo, which is advisory: it should move
+#                    to packages.txt), and is reachable on a stable profile
+#   6. dead keys   — an accept_keywords line whose atom exists in NEITHER tree.
+#                    That line unmasks nothing; it is how gum stayed invisible.
+#
+# Checks 5 and 6 need the GURU overlay. Point GURU_TREE at a checkout, or sync it
+# (eselect repository enable guru && emaint sync -r guru). Without it they SKIP —
+# and --require-tree makes that skip fatal, for the reason spelled out below.
 #
 # Usage:
 #   ./scripts/check-packages.sh                # check, exit non-zero on a real problem
 #   ./scripts/check-packages.sh --quiet        # only report problems
 #   ./scripts/check-packages.sh --require-tree # a missing tree is FATAL, not a skip
+#   GURU_TREE=/path/to/guru ./scripts/check-packages.sh
 #
 # Needs a synced ::gentoo tree. Without one it SKIPS (exit 0) with a message
 # rather than failing — so it is safe to run anywhere, including a laptop that has
@@ -47,6 +62,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PKGS="$HERE/install/packages.txt"
 KEYWORDS="$HERE/gentoo/package.accept_keywords"
+BOOTSTRAP="$HERE/bootstrap.sh"
 QUIET=0
 REQUIRE_TREE=0
 for _arg in "$@"; do
@@ -54,7 +70,7 @@ for _arg in "$@"; do
     --quiet) QUIET=1 ;;
     --require-tree) REQUIRE_TREE=1 ;;
     -h | --help)
-      sed -n '2,30p' "${BASH_SOURCE[0]}"
+      sed -n '2,47p' "${BASH_SOURCE[0]}"
       exit 0
       ;;
     *)
@@ -90,8 +106,34 @@ ARCH=""
 if command -v portageq >/dev/null 2>&1; then ARCH="$(portageq envvar ARCH 2>/dev/null || true)"; fi
 [[ -n "$ARCH" ]] || ARCH=amd64
 
+# ── locate the GURU overlay ───────────────────────────────────────────────────
+# Same precedence as the ::gentoo tree above (an explicit override, then portageq,
+# then the conventional path), because a GURU atom is checkable in exactly one
+# place and guessing wrong means checks 5 and 6 quietly verify nothing.
+# An explicit GURU_TREE is used VERBATIM and never falls back: silently checking
+# /var/db/repos/guru when the operator named some other path would validate a
+# different tree than the one they asked about, and report the answer as theirs.
+GURU=""
+if [[ -n "${GURU_TREE:-}" ]]; then
+  GURU="$GURU_TREE"
+else
+  if command -v portageq >/dev/null 2>&1; then
+    GURU="$(portageq get_repo_path / guru 2>/dev/null || true)"
+  fi
+  [[ -n "$GURU" && -d "$GURU" ]] || GURU=/var/db/repos/guru
+fi
+GURU_OK=1
+if [[ ! -d "$GURU/app-misc" ]]; then
+  if ((REQUIRE_TREE)); then
+    err "no GURU overlay at $GURU, and --require-tree was given — refusing to report success without checking the GURU list"
+    exit 1
+  fi
+  GURU_OK=0
+fi
+
 say "tree:  $TREE"
 say "arch:  $ARCH"
+if ((GURU_OK)); then say "guru:  $GURU"; else say "guru:  (absent — checks 5-6 skipped)"; fi
 
 # ── read the atom list (same stripping rule bootstrap.sh uses) ────────────────
 atoms=()
@@ -101,6 +143,47 @@ while IFS= read -r line; do
   [[ -n "$line" ]] && atoms+=("$line")
 done <"$PKGS"
 say "atoms: ${#atoms[@]}"
+
+# ── the GURU list, read from the guru_install CALL in bootstrap.sh ─────────────
+# Parsed rather than duplicated here on purpose: a second copy of the list is a
+# second thing to forget, and it would have agreed with the first that gum was
+# fine. This reads the arguments of the actual call — the definition line
+# (`guru_install() {`) is excluded by requiring whitespace or a line-end after the
+# name, and comments are stripped, so a mention in prose cannot smuggle an atom in.
+guru_atoms=()
+while IFS= read -r line; do
+  [[ -n "$line" ]] && guru_atoms+=("$line")
+done < <(awk '
+  function emit(s,   n, f, i) {
+    sub(/#.*/, "", s)
+    n = split(s, f, /[[:space:]]+/)
+    for (i = 1; i <= n; i++)
+      if (f[i] != "" && f[i] != "\\") print f[i]
+  }
+  {
+    line = $0
+    if (!collecting) {
+      if (line ~ /^[[:space:]]*guru_install[[:space:]]*\\?[[:space:]]*$/ ||
+          line ~ /^[[:space:]]*guru_install[[:space:]]+[^(]/) {
+        sub(/^[[:space:]]*guru_install/, "", line)
+        collecting = 1
+      } else next
+    }
+    cont = (line ~ /\\[[:space:]]*$/)
+    emit(line)
+    if (!cont) collecting = 0
+  }
+' "$BOOTSTRAP")
+say "guru atoms: ${#guru_atoms[@]} (from the guru_install call in bootstrap.sh)"
+
+# A parser that finds nothing is indistinguishable from a clean bill of health,
+# which is the exact shape of bug this whole script exists to refuse. bootstrap.sh
+# HAS a guru_install call; if we cannot see its arguments the parser has drifted
+# and must fail loudly rather than pass silently.
+if ((${#guru_atoms[@]} == 0)); then
+  err "parsed 0 atoms from the guru_install call in $BOOTSTRAP — the parser has drifted from the script (or the call was removed); refusing to pass without checking it"
+  exit 1
+fi
 
 # ── the keyword list we ship (atom names only; __ARCH__ is rendered at install) ─
 keyworded=()
@@ -142,7 +225,7 @@ _is_keyworded() {
 # ebuilds answers the question that actually matters here: would a FRESH stable
 # box, with only what we ship, be able to install this?
 _has_stable() {
-  local dir="$TREE/$1" f
+  local dir="${2:-$TREE}/$1" f
   for f in "$dir"/*.ebuild; do
     [[ -e "$f" ]] || continue
     grep -qE "^[[:space:]]*KEYWORDS=.*[\"' ]${ARCH}([\"' ]|$)" "$f" && return 0
@@ -152,6 +235,7 @@ _has_stable() {
 
 rc=0
 missing=() unstable_uncovered=() stale=()
+guru_missing=() guru_uncovered=() guru_graduated=() dead_keys=()
 
 for atom in ${atoms[@]+"${atoms[@]}"}; do
   # 1. shape
@@ -181,6 +265,47 @@ for atom in ${keyworded[@]+"${keyworded[@]}"}; do
   _has_stable "$atom" && stale+=("$atom")
 done
 
+# 5 + 6. The GURU list, and keyword lines that unmask nothing.
+#
+# Both need the overlay: without it "not in GURU" and "cannot see GURU" are the
+# same observation, and reporting the second as the first would invent failures
+# on any box that has not synced it. --require-tree has already made an absent
+# overlay fatal further up, so reaching here with GURU_OK=0 means the operator
+# explicitly accepted a partial check.
+if ((GURU_OK)); then
+  for atom in ${guru_atoms[@]+"${guru_atoms[@]}"}; do
+    if [[ "$atom" != */* ]]; then
+      err "$atom — not a category/name atom in the guru_install call"
+      rc=1
+      continue
+    fi
+    if [[ -d "$GURU/$atom" ]]; then
+      # In GURU, as expected. GURU keywords everything ~arch by policy, so the
+      # atom still has to be reachable on a stable profile the same way check 3
+      # demands of a packages.txt atom.
+      if ! _has_stable "$atom" "$GURU" && ! _is_keyworded "$atom"; then
+        guru_uncovered+=("$atom")
+        rc=1
+      fi
+    elif [[ -d "$TREE/$atom" ]]; then
+      # Graduated to the main tree. Not broken — but guru_install runs AFTER the
+      # main emerge, so leaving it here installs it later than it needs to be.
+      guru_graduated+=("$atom")
+    else
+      guru_missing+=("$atom")
+      rc=1
+    fi
+  done
+
+  # 6. the gum line: a keyword for an atom that exists nowhere unmasks nothing,
+  # and reads as proof the atom was considered and handled.
+  for atom in ${keyworded[@]+"${keyworded[@]}"}; do
+    [[ -d "$TREE/$atom" || -d "$GURU/$atom" ]] && continue
+    dead_keys+=("$atom")
+    rc=1
+  done
+fi
+
 ((${#missing[@]} == 0)) || {
   err "not in ::gentoo (typo, wrong category, or overlay-only — overlay atoms do not belong in packages.txt):"
   printf '        %s\n' "${missing[@]}" >&2
@@ -193,9 +318,29 @@ done
   warn "these have gone stable — the accept_keywords line is now dead weight and can be dropped:"
   printf '        %s\n' "${stale[@]}" >&2
 }
+((${#guru_missing[@]} == 0)) || {
+  err "bootstrap.sh emerges these from GURU, but they exist in NEITHER GURU nor ::gentoo — every run skips them (this is the app-misc/gum bug):"
+  printf '        %s\n' "${guru_missing[@]}" >&2
+}
+((${#guru_uncovered[@]} == 0)) || {
+  err "in GURU with no stable keyword for $ARCH and no line in gentoo/package.accept_keywords — a stable profile CANNOT install these:"
+  printf '        %s\n' "${guru_uncovered[@]}" >&2
+}
+((${#dead_keys[@]} == 0)) || {
+  err "accept_keywords lines for atoms that exist in neither tree — they unmask nothing and hide the real problem:"
+  printf '        %s\n' "${dead_keys[@]}" >&2
+}
+((${#guru_graduated[@]} == 0)) || {
+  warn "these are in ::gentoo now — move them from bootstrap.sh's guru_install to install/packages.txt so the main emerge installs them:"
+  printf '        %s\n' "${guru_graduated[@]}" >&2
+}
 
 if ((rc == 0)); then
-  say "OK — every atom exists and is installable on a stable $ARCH profile"
+  if ((GURU_OK)); then
+    say "OK — every atom (packages.txt + the GURU list) exists and is installable on a stable $ARCH profile"
+  else
+    say "OK — every packages.txt atom exists and is installable on a stable $ARCH profile (GURU absent: the guru_install list was NOT checked)"
+  fi
 else
   err "packages.txt / accept_keywords need attention (see above)"
 fi

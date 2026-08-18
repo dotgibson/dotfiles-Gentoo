@@ -1,5 +1,6 @@
 # .github/workflows/packages.yml
-# Gate install/packages.txt against a REAL Portage tree.
+# Gate the package set against REAL Portage trees — install/packages.txt against
+# ::gentoo, and bootstrap.sh's guru_install list against the GURU overlay.
 #
 # Not a reusable caller: this check is Gentoo-only by nature (no other repo in the
 # fleet has atoms, keywords or a stable/testing split), so there is nothing to
@@ -7,7 +8,7 @@
 # way locally — `make check-packages`.
 #
 # Cost: emerge-webrsync pulls a tree snapshot (~1-2 min) rather than emerge --sync,
-# which is much slower and needs rsync mirrors.
+# which is much slower and needs rsync mirrors; the GURU tarball adds ~14 MB.
 #
 # This one KEEPS its paths filter, unlike lint.yml and bootstrap.yml which dropped
 # theirs so they could become required checks. The reasoning is the same rule read
@@ -24,6 +25,11 @@ on:
       - 'install/packages.txt'
       - 'gentoo/package.accept_keywords'
       - 'scripts/check-packages.sh'
+      # bootstrap.sh carries the guru_install list, which checks 5-6 validate. A
+      # phantom atom added there is exactly the bug this gate now catches, so a
+      # change to it has to trigger the gate — otherwise the check that exists to
+      # catch it never runs on the commit that introduces it.
+      - 'bootstrap.sh'
       - '.github/workflows/packages.yml'
   push:
     branches: [main]
@@ -31,6 +37,7 @@ on:
       - 'install/packages.txt'
       - 'gentoo/package.accept_keywords'
       - 'scripts/check-packages.sh'
+      - 'bootstrap.sh'
       # The workflow itself, same as in pull_request above — without it a
       # workflow-only change lands on main with no signal, which is the one commit
       # you most want checked.
@@ -61,10 +68,32 @@ jobs:
       - name: Fetch a Portage tree snapshot
         run: emerge-webrsync
 
+      # Checks 5-6 read the GURU overlay, which no stage3 ships and which
+      # `eselect repository enable guru` would pull in via a compile of
+      # app-eselect/eselect-repository plus a full git sync. A snapshot tarball is
+      # the same tree for a read-only existence check: ~14 MB, a couple of seconds,
+      # and no git in the image. It is the mirror this repo's boxes already sync
+      # from, so the answer here matches the answer on a provisioned machine.
+      - name: Fetch the GURU overlay
+        # Explicit bash: the default `sh -e {0}` only happens to work here because
+        # Gentoo's /bin/sh is bash, and `set -o pipefail` is not POSIX.
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /var/db/repos
+          wget -qO /tmp/guru.tar.gz \
+            https://github.com/gentoo-mirror/guru/archive/refs/heads/master.tar.gz
+          tar -xzf /tmp/guru.tar.gz -C /var/db/repos
+          mv /var/db/repos/guru-master /var/db/repos/guru
+          test -d /var/db/repos/guru/app-misc
+
       # --require-tree: without it the script SKIPS (exit 0) when it finds no synced
       # tree, which is right for a laptop and exactly wrong here — if
-      # emerge-webrsync ever moves, changes, or half-succeeds, this gate would go
-      # green having validated nothing. That is the same failure this PR fixes in
-      # the bootstrap fixture, so it should not be reintroduced one file over.
+      # emerge-webrsync or the GURU fetch ever moves, changes, or half-succeeds,
+      # this gate would go green having validated nothing. It now covers the GURU
+      # overlay too, so a broken fetch above fails here rather than quietly
+      # downgrading to "packages.txt only".
       - name: check-packages
         run: ./scripts/check-packages.sh --require-tree
+        env:
+          GURU_TREE: /var/db/repos/guru
