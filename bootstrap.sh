@@ -21,6 +21,7 @@ LINKS_ONLY=0
 DO_SYNC=1
 STRICT=0
 DRY=0
+PORTAGE_CONFIG=1
 # --only/--skip are validated by the shared lib (blib_select), which is sourced
 # AFTER this loop — so capture the raw values now and apply them below.
 ONLY_RAW="" SKIP_RAW="" ONLY_SEEN=0 SKIP_SEEN=0
@@ -38,6 +39,7 @@ Usage:
   ./bootstrap.sh --links-only    # just (re)create symlinks (needs no privileges)
   ./bootstrap.sh --dry-run       # print the full plan, change nothing
   ./bootstrap.sh --strict        # exit non-zero if any best-effort step failed
+  ./bootstrap.sh --no-portage-config  # do NOT touch /etc/portage
   ./bootstrap.sh --only zsh,nvim # link ONLY these Core module groups
   ./bootstrap.sh --skip tmux     # link everything EXCEPT these groups
 
@@ -48,6 +50,14 @@ They affect the wiring steps only, never package provisioning; combine with
 Gentoo notes:
   • emerge COMPILES. Enable the binhost (auto-detected here) and keep
     dev-lang/rust-bin rather than dev-lang/rust — see the README.
+  • Unless --no-portage-config is given, two namespaced files are installed under
+    /etc/portage: package.accept_keywords/90-dotfiles-Gentoo and
+    package.license/90-dotfiles-Gentoo. Without them a stable profile cannot
+    install ~a quarter of this stack at all. Preview with --dry-run; the sources
+    are gentoo/package.accept_keywords and gentoo/package.license.
+  • MAKEOPTS is set for the run when your make.conf does not set it — Portage
+    otherwise compiles single-threaded, which on a source-based distro is the
+    difference between minutes and hours.
   • A keyword/USE-masked atom is skipped, reported, and never fatal; the run
     ends with a list of everything that did not complete. --strict turns that
     list into a non-zero exit (use it in CI).
@@ -59,6 +69,7 @@ while [[ $# -gt 0 ]]; do case "$1" in
   --no-sync) DO_SYNC=0 ;;
   --dry-run) DRY=1 ;;
   --strict) STRICT=1 ;;
+  --no-portage-config) PORTAGE_CONFIG=0 ;;
   --only) [[ $# -ge 2 ]] || {
     echo "--only requires module names, e.g. --only zsh,nvim" >&2
     exit 1
@@ -260,6 +271,113 @@ _dotfiles_go_install() { # <import-path@version> <binary-name>
   return 0
 }
 
+# ── /etc/portage config: keywords + licences ──────────────────────────────────
+# Gentoo's stable profile does not carry a usable keyword for every tool in this
+# stack — `app-shells/zoxide` and `sys-fs/duf` have NO stable-keyworded ebuild in
+# ::gentoo at all, and GURU is testing-keyworded by policy. Shipping the fix as a
+# commented-out .example (as this repo did) meant a fresh box finished "complete"
+# having silently skipped roughly a quarter of the stack.
+#
+# So: install it. Rules that keep this honest rather than invasive —
+#   • ONE namespaced file per directory (90-dotfiles-Gentoo), never a shared file,
+#     so uninstalling is `rm` and nothing we wrote can collide with a hand-written
+#     entry or with a file another package owns;
+#   • idempotent — byte-identical content is a no-op, a differing file is backed
+#     up to .pre-dotfiles.<epoch> before being replaced;
+#   • opt-out with --no-portage-config, previewable with --dry-run;
+#   • per-atom lines only. No `*/* ~arch`.
+#
+# __ARCH__ is rendered from `portageq envvar ARCH` so this is correct on arm64 or
+# any other arch, not just amd64.
+_portage_conf_install() { # <src> <portage-subdir>
+  local src="$1" dir="/etc/portage/$2" dst="/etc/portage/$2/90-dotfiles-Gentoo"
+  local arch rendered current
+  [[ -r "$src" ]] || {
+    blib_note_fail "portage config: $src is missing — skipped"
+    return 0
+  }
+  arch="$(portageq envvar ARCH 2>/dev/null || true)"
+  [[ -n "$arch" ]] || arch="$(uname -m)"
+  rendered="$(<"$src")"
+  rendered="${rendered//__ARCH__/$arch}"
+
+  # A single REGULAR FILE at /etc/portage/package.accept_keywords is a valid (and
+  # older) layout — we cannot drop a file inside it. Say so precisely instead of
+  # failing with a confusing mkdir error.
+  if [[ -f "$dir" && ! -d "$dir" ]]; then
+    blib_note_fail "portage config: $dir is a regular file, not a directory — merge $src into it by hand (or move it to $dir/00-local and re-run)"
+    return 0
+  fi
+
+  current=""
+  [[ -r "$dst" ]] && current="$(<"$dst")"
+  if [[ -e "$dst" && "$rendered" == "$current" ]]; then
+    blib_say "portage config: $dst already current"
+    return 0
+  fi
+  if ((DRY)); then
+    if [[ -e "$dst" ]]; then
+      blib_say "would back up + rewrite $dst (from ${src##*/}, ARCH=$arch)"
+    else
+      blib_say "would install $dst (from ${src##*/}, ARCH=$arch)"
+    fi
+    return 0
+  fi
+  blib_priv mkdir -p "$dir" || {
+    blib_note_fail "portage config: could not create $dir — skipped"
+    return 0
+  }
+  if [[ -e "$dst" ]]; then
+    blib_priv cp -p "$dst" "$dst.pre-dotfiles.$(date +%s)" ||
+      blib_note_fail "portage config: could not back up $dst — leaving it untouched"
+  fi
+  printf '%s\n' "$rendered" | blib_priv tee "$dst" >/dev/null || {
+    blib_note_fail "portage config: could not write $dst"
+    return 0
+  }
+  blib_ok "portage config: $dst"
+}
+
+install_portage_config() {
+  ((PORTAGE_CONFIG)) || {
+    blib_say "--no-portage-config: leaving /etc/portage alone (keyword/licence-masked atoms will be skipped)"
+    return 0
+  }
+  _portage_conf_install "$DOTFILES/gentoo/package.accept_keywords" package.accept_keywords
+  _portage_conf_install "$DOTFILES/gentoo/package.license" package.license
+}
+
+# ── build parallelism ─────────────────────────────────────────────────────────
+# A stage3's make.conf ships with NO MAKEOPTS, so Portage compiles single-threaded.
+# On a source-based distro that is the single largest avoidable cost of a bootstrap
+# — measured on this box: 32 cores sitting idle behind `-j1`.
+#
+# Set it for THIS RUN only (exported into the environment Portage reads), never by
+# editing make.conf: the permanent value is the operator's call, and the README
+# says so. If make.conf or the environment already sets it, that wins untouched.
+#
+# The job count is min(nproc, RAM_GB / 2) — the standard Gentoo guidance, because
+# parallel compiler processes are bounded by memory long before they are bounded by
+# cores (a 4-core/2 GB VPS that runs -j4 will OOM mid-build, and the failure lands
+# somewhere far from its cause).
+_tune_build_parallelism() {
+  local cur cores memkb memjobs jobs
+  cur="${MAKEOPTS:-}"
+  [[ -z "$cur" ]] && cur="$(portageq envvar MAKEOPTS 2>/dev/null || true)"
+  if [[ -n "$cur" ]]; then
+    blib_say "MAKEOPTS already set ($cur) — left alone"
+    return 0
+  fi
+  cores="$(nproc 2>/dev/null || echo 1)"
+  memkb="$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null || echo 0)"
+  memjobs=$((memkb / 1024 / 1024 / 2)) # GB / 2
+  ((memjobs < 1)) && memjobs=1
+  jobs="$cores"
+  ((memjobs < jobs)) && jobs="$memjobs"
+  export MAKEOPTS="-j$jobs"
+  blib_say "MAKEOPTS unset in make.conf — using -j$jobs for this run (${cores} cores, $((memkb / 1024 / 1024)) GB RAM). Make it permanent in /etc/portage/make.conf."
+}
+
 # ── /etc/wsl.conf ─────────────────────────────────────────────────────────────
 # Rendered in bash (not sed): the username is substituted with ${var//…}, so a name
 # containing a sed metacharacter — `/` ends the s/// expression, `&` expands to the
@@ -318,8 +436,10 @@ provision() {
   mapfile -t atoms < <(blib_read_pkgs "$pkglist")
 
   if ((DRY)); then
-    # ${DO_SYNC:+…} is WRONG here: :+ tests non-EMPTY, and "0" is non-empty, so
-    # --no-sync still printed "would emerge --sync". Test the value.
+    install_portage_config
+    _tune_build_parallelism
+    # ${DO_SYNC:+…} would be WRONG here: :+ tests non-EMPTY, and "0" is non-empty,
+    # so --no-sync still printed "would emerge --sync". Test the value.
     ((DO_SYNC)) && blib_say "would emerge --sync (Portage tree)"
     ((DO_SYNC)) || blib_say "--no-sync: would skip emerge --sync"
     blib_say "would emerge ${#atoms[@]} atoms from install/packages.txt:"
@@ -332,6 +452,11 @@ provision() {
     ((IS_WSL)) && install_wsl_conf
     return 0
   fi
+
+  # Keywords + licences BEFORE the first emerge: they are what makes the emerge
+  # below able to install the atoms at all.
+  install_portage_config
+  _tune_build_parallelism
 
   if ((DO_SYNC)); then
     blib_say "emerge --sync (Portage tree — slow; re-run with --no-sync to skip)"
