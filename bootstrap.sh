@@ -293,7 +293,7 @@ guru_install() {
   # entry / synced repo on disk). If not, enable + sync it — all best-effort.
   if ! eselect repository list -i 2>/dev/null | grep -qw guru &&
     [[ ! -d /var/db/repos/guru ]]; then
-    blib_say "enabling the GURU overlay (for sd/glow/gum/xh/carapace/op)"
+    blib_say "enabling the GURU overlay (for sd/glow/xh/carapace/op)"
     if blib_priv eselect repository enable guru >/dev/null 2>&1 &&
       blib_priv emaint sync -r guru >/dev/null 2>&1; then
       :
@@ -303,7 +303,7 @@ guru_install() {
   fi
   # Only attempt the emerge if GURU is actually available now. Reuse the repo's
   # per-atom-tolerant emerge_install so one masked/keyworded GURU atom (e.g.
-  # app-misc/gum) doesn't stop emerge early and skip the rest.
+  # app-misc/yazi) doesn't stop emerge early and skip the rest.
   if eselect repository list -i 2>/dev/null | grep -qw guru || [[ -d /var/db/repos/guru ]]; then
     blib_say "emerge GURU tools (best-effort): ${atoms[*]}"
     emerge_install "${atoms[@]}"
@@ -850,7 +850,6 @@ provision() {
   guru_install \
     sys-apps/sd \
     app-misc/glow \
-    app-misc/gum \
     net-misc/xh \
     app-shells/carapace \
     app-misc/1password-cli \
