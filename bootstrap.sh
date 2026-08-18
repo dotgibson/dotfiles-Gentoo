@@ -605,7 +605,7 @@ _user_install_mise_tools() {
 _user_write_zshenv() {
   local rc="$HOME/.zshenv" marker="dotfiles-Gentoo user-mode PATH"
   if [[ -e "$rc" ]] && ! grep -q "$marker" "$rc" 2>/dev/null; then
-    blib_warn "~/.zshenv exists and is not ours — leaving it alone. For mise-installed tools to be seen by Core's probes, it must put ~/.local/share/mise/shims (and ~/.local/bin, ~/.cargo/bin) on \$PATH."
+    blib_warn "$rc exists and is not ours — leaving it alone. For mise-installed tools to be seen by Core's probes, it must put \$XDG_DATA_HOME/mise/shims (and \$HOME/.local/bin, \$HOME/.cargo/bin) on \$PATH."
     return 0
   fi
   if ((DRY)); then
@@ -629,7 +629,7 @@ unset _mise_shims
 [[ -d $HOME/.cargo/bin ]] && path=("$HOME/.cargo/bin" $path)
 export PATH
 ZENV
-  blib_ok "~/.zshenv written (mise shims + user bindirs ahead of Core's probes)"
+  blib_ok "$rc written (mise shims + user bindirs ahead of Core's probes)"
 }
 
 # The login shell, without root. blib_set_login_shell runs `chsh -s <zsh>`, but
