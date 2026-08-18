@@ -1,0 +1,36 @@
+# dotfiles-Gentoo/gentoo/package.license
+# ──────────────────────────────────────────────────────────────────────────────
+# INSTALLED by bootstrap.sh to:
+#
+#     /etc/portage/package.license/90-dotfiles-Gentoo
+#
+# Skip with `./bootstrap.sh --no-portage-config`; remove by deleting that file.
+#
+# Portage's default ACCEPT_LICENSE is `-* @FREE`, so a package under a
+# proprietary licence is masked no matter what its keywords say. Exactly one atom
+# in this stack is affected — and without this line it fails with a licence mask
+# rather than a keyword mask, which is a different error message for the same
+# outcome: a permanent ✗ next to `op` in `core doctor`.
+#
+# This is a REAL choice, not a formality: accepting it means agreeing to
+# 1Password's EULA. If you would rather not, delete the line and drop
+# app-misc/1password-cli from the guru_install list in bootstrap.sh — Core's
+# 1Password helpers (zsh/50-op.zsh) are all HAVE_OP-gated and simply stay quiet.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# 1Password CLI — proprietary; `op` in the doctor's data/net group.
+#
+# `*` rather than the exact licence token, deliberately. Pinning the token is the
+# stricter form and would be preferable — a broad `*` silently accepts a future
+# relicence — but the token is only readable from the ebuild, and this atom lives
+# in GURU, which is not synced until bootstrap.sh enables it. Naming a token that
+# turns out to be wrong is the worse failure: the atom stays licence-masked and the
+# error points at the licence file rather than at the guess in it.
+#
+# What bounds the risk is that this is scoped to ONE atom, not a class: no
+# `*/* *` line, and nothing else in this stack is under a non-free licence. To
+# tighten it once GURU is synced:
+#
+#     equery meta app-misc/1password-cli      # or: grep LICENSE= on the ebuild
+#     # then replace the * below with that token
+app-misc/1password-cli *

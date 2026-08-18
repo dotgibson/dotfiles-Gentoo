@@ -21,6 +21,8 @@ LINKS_ONLY=0
 DO_SYNC=1
 STRICT=0
 DRY=0
+PORTAGE_CONFIG=1
+EXTRAS=1
 # --only/--skip are validated by the shared lib (blib_select), which is sourced
 # AFTER this loop — so capture the raw values now and apply them below.
 ONLY_RAW="" SKIP_RAW="" ONLY_SEEN=0 SKIP_SEEN=0
@@ -38,6 +40,8 @@ Usage:
   ./bootstrap.sh --links-only    # just (re)create symlinks (needs no privileges)
   ./bootstrap.sh --dry-run       # print the full plan, change nothing
   ./bootstrap.sh --strict        # exit non-zero if any best-effort step failed
+  ./bootstrap.sh --no-portage-config  # do NOT touch /etc/portage
+  ./bootstrap.sh --no-extras     # skip the opt-in source builds (see below)
   ./bootstrap.sh --only zsh,nvim # link ONLY these Core module groups
   ./bootstrap.sh --skip tmux     # link everything EXCEPT these groups
 
@@ -48,6 +52,19 @@ They affect the wiring steps only, never package provisioning; combine with
 Gentoo notes:
   • emerge COMPILES. Enable the binhost (auto-detected here) and keep
     dev-lang/rust-bin rather than dev-lang/rust — see the README.
+  • Unless --no-portage-config is given, two namespaced files are installed under
+    /etc/portage: package.accept_keywords/90-dotfiles-Gentoo and
+    package.license/90-dotfiles-Gentoo. Without them a stable profile cannot
+    install ~a quarter of this stack at all. Preview with --dry-run; the sources
+    are gentoo/package.accept_keywords and gentoo/package.license.
+  • MAKEOPTS is set for the run when your make.conf does not set it — Portage
+    otherwise compiles single-threaded, which on a source-based distro is the
+    difference between minutes and hours.
+  • Five tools are packaged nowhere on Gentoo and are built with cargo: ouch,
+    ast-grep, jnv, jj, watchexec. Nothing in Core wires them by default (every
+    one is HAVE_*-gated), so --no-extras skips them for a faster first run —
+    at the cost of a ✗ next to each in `core doctor`. The tools Core DOES wire
+    (tree-sitter, viddy, gron, sesh, shfmt) are always installed.
   • A keyword/USE-masked atom is skipped, reported, and never fatal; the run
     ends with a list of everything that did not complete. --strict turns that
     list into a non-zero exit (use it in CI).
@@ -59,6 +76,8 @@ while [[ $# -gt 0 ]]; do case "$1" in
   --no-sync) DO_SYNC=0 ;;
   --dry-run) DRY=1 ;;
   --strict) STRICT=1 ;;
+  --no-portage-config) PORTAGE_CONFIG=0 ;;
+  --no-extras) EXTRAS=0 ;;
   --only) [[ $# -ge 2 ]] || {
     echo "--only requires module names, e.g. --only zsh,nvim" >&2
     exit 1
@@ -238,6 +257,30 @@ guru_install() {
   fi
 }
 
+# ── cargo-install fallback: Rust CLIs packaged nowhere on Gentoo ───────────────
+# Same shape as _dotfiles_go_install below: guarded on the binary already existing
+# (which now WORKS, because blib_user_bindirs_on_path put ~/.cargo/bin on PATH —
+# without it every one of these rebuilt from source on every run), never aborts,
+# and records a failure rather than printing one into the scroll.
+#
+# The crate name is NOT always the binary name and getting it wrong is silent:
+# `jj-cli` provides `jj` (the `jujutsu` crate is an abandoned stub that just
+# redirects), and `watchexec-cli` provides `watchexec` (plain `watchexec` is the
+# library — installing it gives you no binary at all). Both are documented in
+# core/PORTING-MATRIX.md, footnotes 8 and 25.
+_dotfiles_cargo_install() { # <crate> <binary-name>
+  [ "$#" -ge 2 ] || return 0
+  if command -v "$2" >/dev/null 2>&1; then return 0; fi
+  if ! command -v cargo >/dev/null 2>&1; then
+    blib_note_fail "$2: needs cargo (dev-lang/rust-bin, in packages.txt) — install later: cargo install --locked $1"
+    return 0
+  fi
+  blib_say "$2 (cargo build — crate: $1)"
+  cargo install --locked "$1" >/dev/null 2>&1 ||
+    blib_note_fail "$2: cargo build failed — retry later: cargo install --locked $1"
+  return 0
+}
+
 # ── go-install fallback: tools packaged nowhere. Uses the system go, else mise's
 # go, else leaves a copy-paste hint. Always returns 0 (never aborts errexit). ────
 # go install drops binaries in ~/go/bin, which is NOT on the shell PATH (the
@@ -258,6 +301,140 @@ _dotfiles_go_install() { # <import-path@version> <binary-name>
     blib_note_fail "$2: needs Go — install later with: GOBIN=$gobin go install $1"
   fi
   return 0
+}
+
+# ── /etc/portage config: keywords + licences ──────────────────────────────────
+# Gentoo's stable profile does not carry a usable keyword for every tool in this
+# stack — `app-shells/zoxide` and `sys-fs/duf` have NO stable-keyworded ebuild in
+# ::gentoo at all, and GURU is testing-keyworded by policy. Shipping the fix as a
+# commented-out .example (as this repo did) meant a fresh box finished "complete"
+# having silently skipped roughly a quarter of the stack.
+#
+# So: install it. Rules that keep this honest rather than invasive —
+#   • ONE namespaced file per directory (90-dotfiles-Gentoo), never a shared file,
+#     so uninstalling is `rm` and nothing we wrote can collide with a hand-written
+#     entry or with a file another package owns;
+#   • idempotent — byte-identical content is a no-op, a differing file is backed
+#     up to .pre-dotfiles.<epoch> before being replaced;
+#   • opt-out with --no-portage-config, previewable with --dry-run;
+#   • per-atom lines only. No `*/* ~arch`.
+#
+# __ARCH__ is rendered from `portageq envvar ARCH` so this is correct on arm64 or
+# any other arch, not just amd64.
+_portage_conf_install() { # <src> <portage-subdir>
+  local src="$1" dir="/etc/portage/$2" dst="/etc/portage/$2/90-dotfiles-Gentoo"
+  local arch rendered current
+  [[ -r "$src" ]] || {
+    blib_note_fail "portage config: $src is missing — skipped"
+    return 0
+  }
+  # portageq is authoritative: ARCH is Portage's KEYWORD name, which is NOT the
+  # kernel's machine name. `uname -m` says x86_64 where Portage says amd64, and
+  # aarch64 where Portage says arm64 — so the old fallback would have rendered
+  # `~x86_64`, a keyword that matches nothing. The file would install cleanly and
+  # every atom would stay masked: a silent no-op that looks like success.
+  #
+  # Hence: map the handful of known kernel names, and REFUSE to write anything for
+  # an unrecognised one. A wrong keyword file is worse than none, because none at
+  # least fails loudly at the emerge.
+  arch="$(portageq envvar ARCH 2>/dev/null || true)"
+  if [[ -z "$arch" ]]; then
+    case "$(uname -m 2>/dev/null || true)" in
+      x86_64 | amd64) arch=amd64 ;;
+      aarch64 | arm64) arch=arm64 ;;
+      armv7l | armv6l) arch=arm ;;
+      i?86) arch=x86 ;;
+      ppc64le | ppc64) arch=ppc64 ;;
+      riscv64) arch=riscv ;;
+      *)
+        blib_note_fail "portage config: could not determine Portage's ARCH (portageq unavailable, and '$(uname -m 2>/dev/null)' is not a name I map) — skipped ${src##*/}; set it by hand in $dst"
+        return 0
+        ;;
+    esac
+    blib_warn "portageq unavailable — inferred ARCH=$arch from uname; verify with 'portageq envvar ARCH'"
+  fi
+  rendered="$(<"$src")"
+  rendered="${rendered//__ARCH__/$arch}"
+
+  # A single REGULAR FILE at /etc/portage/package.accept_keywords is a valid (and
+  # older) layout — we cannot drop a file inside it. Say so precisely instead of
+  # failing with a confusing mkdir error.
+  if [[ -f "$dir" && ! -d "$dir" ]]; then
+    blib_note_fail "portage config: $dir is a regular file, not a directory — append the contents of $src to it by hand (rendering __ARCH__ as $arch), or convert it: mv $dir $dir.tmp && mkdir $dir && mv $dir.tmp $dir/00-local, then re-run"
+    return 0
+  fi
+
+  current=""
+  [[ -r "$dst" ]] && current="$(<"$dst")"
+  if [[ -e "$dst" && "$rendered" == "$current" ]]; then
+    blib_say "portage config: $dst already current"
+    return 0
+  fi
+  if ((DRY)); then
+    if [[ -e "$dst" ]]; then
+      blib_say "would back up + rewrite $dst (from ${src##*/}, ARCH=$arch)"
+    else
+      blib_say "would install $dst (from ${src##*/}, ARCH=$arch)"
+    fi
+    return 0
+  fi
+  blib_priv mkdir -p "$dir" || {
+    blib_note_fail "portage config: could not create $dir — skipped"
+    return 0
+  }
+  if [[ -e "$dst" ]]; then
+    # RETURN on a failed backup: writing anyway would destroy the content the
+    # backup exists to preserve, while logging "leaving it untouched".
+    blib_priv cp -p "$dst" "$dst.pre-dotfiles.$(date +%s)" || {
+      blib_note_fail "portage config: could not back up $dst — leaving it untouched (fix the backup, then re-run)"
+      return 0
+    }
+  fi
+  printf '%s\n' "$rendered" | blib_priv tee "$dst" >/dev/null || {
+    blib_note_fail "portage config: could not write $dst"
+    return 0
+  }
+  blib_ok "portage config: $dst"
+}
+
+install_portage_config() {
+  ((PORTAGE_CONFIG)) || {
+    blib_say "--no-portage-config: leaving /etc/portage alone (keyword/licence-masked atoms will be skipped)"
+    return 0
+  }
+  _portage_conf_install "$DOTFILES/gentoo/package.accept_keywords" package.accept_keywords
+  _portage_conf_install "$DOTFILES/gentoo/package.license" package.license
+}
+
+# ── build parallelism ─────────────────────────────────────────────────────────
+# A stage3's make.conf ships with NO MAKEOPTS, so Portage compiles single-threaded.
+# On a source-based distro that is the single largest avoidable cost of a bootstrap
+# — measured on this box: 32 cores sitting idle behind `-j1`.
+#
+# Set it for THIS RUN only (exported into the environment Portage reads), never by
+# editing make.conf: the permanent value is the operator's call, and the README
+# says so. If make.conf or the environment already sets it, that wins untouched.
+#
+# The job count is min(nproc, RAM_GB / 2) — the standard Gentoo guidance, because
+# parallel compiler processes are bounded by memory long before they are bounded by
+# cores (a 4-core/2 GB VPS that runs -j4 will OOM mid-build, and the failure lands
+# somewhere far from its cause).
+_tune_build_parallelism() {
+  local cur cores memkb memjobs jobs
+  cur="${MAKEOPTS:-}"
+  [[ -z "$cur" ]] && cur="$(portageq envvar MAKEOPTS 2>/dev/null || true)"
+  if [[ -n "$cur" ]]; then
+    blib_say "MAKEOPTS already set ($cur) — left alone"
+    return 0
+  fi
+  cores="$(nproc 2>/dev/null || echo 1)"
+  memkb="$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null || echo 0)"
+  memjobs=$((memkb / 1024 / 1024 / 2)) # GB / 2
+  ((memjobs < 1)) && memjobs=1
+  jobs="$cores"
+  ((memjobs < jobs)) && jobs="$memjobs"
+  export MAKEOPTS="-j$jobs"
+  blib_say "MAKEOPTS unset in make.conf — using -j$jobs for this run (${cores} cores, $((memkb / 1024 / 1024)) GB RAM). Make it permanent in /etc/portage/make.conf."
 }
 
 # ── /etc/wsl.conf ─────────────────────────────────────────────────────────────
@@ -318,8 +495,10 @@ provision() {
   mapfile -t atoms < <(blib_read_pkgs "$pkglist")
 
   if ((DRY)); then
-    # ${DO_SYNC:+…} is WRONG here: :+ tests non-EMPTY, and "0" is non-empty, so
-    # --no-sync still printed "would emerge --sync". Test the value.
+    install_portage_config
+    _tune_build_parallelism
+    # ${DO_SYNC:+…} would be WRONG here: :+ tests non-EMPTY, and "0" is non-empty,
+    # so --no-sync still printed "would emerge --sync". Test the value.
     ((DO_SYNC)) && blib_say "would emerge --sync (Portage tree)"
     ((DO_SYNC)) || blib_say "--no-sync: would skip emerge --sync"
     blib_say "would emerge ${#atoms[@]} atoms from install/packages.txt:"
@@ -328,10 +507,20 @@ provision() {
     ((${#atoms[@]})) && printf '     %s\n' "${atoms[@]}"
     blib_say "would enable the GURU overlay and emerge its tools (best-effort)"
     blib_say "would install mise / tree-sitter-cli / viddy where missing"
-    blib_say "would go-install: gron, sesh"
+    blib_say "would go-install: gron, sesh, shfmt"
+    if ((EXTRAS)); then
+      blib_say "would cargo-build the opt-in set: ouch, ast-grep, jnv, jj, watchexec"
+    else
+      blib_say "--no-extras: would skip ouch / ast-grep / jnv / jj / watchexec"
+    fi
     ((IS_WSL)) && install_wsl_conf
     return 0
   fi
+
+  # Keywords + licences BEFORE the first emerge: they are what makes the emerge
+  # below able to install the atoms at all.
+  install_portage_config
+  _tune_build_parallelism
 
   if ((DO_SYNC)); then
     blib_say "emerge --sync (Portage tree — slow; re-run with --no-sync to skip)"
@@ -361,19 +550,10 @@ provision() {
     curl -fsSL https://mise.run | sh >/dev/null 2>&1 ||
       blib_note_fail "mise: installer failed — retry later: curl -fsSL https://mise.run | sh"
   fi
-  # tree-sitter-cli — not packaged; build via cargo (dev-lang/rust-bin provides it).
-  if ! command -v tree-sitter >/dev/null && command -v cargo >/dev/null; then
-    blib_say "tree-sitter-cli (cargo build)"
-    cargo install --locked tree-sitter-cli >/dev/null 2>&1 ||
-      blib_note_fail "tree-sitter-cli: cargo build failed — retry later: cargo install --locked tree-sitter-cli"
-  fi
-  # viddy (watch replacement; Core aliases watch->viddy, HAVE_VIDDY-guarded) is a Rust
-  # CLI, packaged nowhere on Gentoo — build via cargo.
-  if ! command -v viddy >/dev/null && command -v cargo >/dev/null; then
-    blib_say "viddy (cargo build — watch replacement)"
-    cargo install --locked viddy >/dev/null 2>&1 ||
-      blib_note_fail "viddy: cargo build failed — retry later: cargo install --locked viddy"
-  fi
+  # ── cargo builds Core actively WIRES (not optional) ──────────────────────────
+  # tree-sitter-cli backs nvim-treesitter; viddy backs the watch->viddy alias.
+  _dotfiles_cargo_install tree-sitter-cli tree-sitter
+  _dotfiles_cargo_install viddy viddy
   # NOTE: starship / atuin are emerged from packages.txt on Gentoo (they ARE in
   # the main tree), so unlike the other repos there's no curl installer here. yazi
   # is NOT in the main tree (GURU-only) — it's emerged in the guru_install block.
@@ -392,11 +572,31 @@ provision() {
     app-misc/tealdeer \
     app-misc/yazi \
     dev-vcs/lazygit \
-    app-shells/direnv
+    app-shells/direnv \
+    net-analyzer/gping
 
-  # ── go-install tools (packaged nowhere): gron, sesh ──────────────────────────
+  # ── go-install tools (packaged nowhere) ──────────────────────────────────────
+  # gron and sesh are wired by Core (sesh is the Ctrl-G session picker); shfmt backs
+  # nvim's conform formatter and is the one tool in this stack that is absent from
+  # BOTH ::gentoo and GURU (PORTING-MATRIX footnote 7 — there is no dev-go/shfmt
+  # atom, and the overlays that do carry it call it dev-util/shfmt).
   _dotfiles_go_install github.com/tomnomnom/gron@latest gron
   _dotfiles_go_install github.com/joshmedeski/sesh/v2@latest sesh
+  _dotfiles_go_install mvdan.cc/sh/v3/cmd/shfmt@latest shfmt
+
+  # ── opt-in source builds (--no-extras skips these) ───────────────────────────
+  # Packaged nowhere on Gentoo. Every one is HAVE_*-gated in Core, so skipping them
+  # costs nothing but a ✗ in `core doctor` — which is precisely why they were never
+  # installed and the doctor was never clean. jj is additive and never replaces git.
+  if ((EXTRAS)); then
+    _dotfiles_cargo_install ouch ouch
+    _dotfiles_cargo_install ast-grep ast-grep
+    _dotfiles_cargo_install jnv jnv
+    _dotfiles_cargo_install jj-cli jj
+    _dotfiles_cargo_install watchexec-cli watchexec
+  else
+    blib_say "--no-extras: skipping ouch / ast-grep / jnv / jj / watchexec"
+  fi
 
   # ── WSL: install /etc/wsl.conf. No systemd=true — Gentoo defaults to OpenRC. ──
   ((IS_WSL)) && install_wsl_conf

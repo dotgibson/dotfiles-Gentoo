@@ -1,0 +1,60 @@
+# dotfiles-Gentoo/gentoo/package.accept_keywords
+# ──────────────────────────────────────────────────────────────────────────────
+# INSTALLED, not just documented. bootstrap.sh renders __ARCH__ from
+# `portageq envvar ARCH` and writes this to:
+#
+#     /etc/portage/package.accept_keywords/90-dotfiles-Gentoo
+#
+# Skip it with `./bootstrap.sh --no-portage-config`, and remove it by deleting
+# that one namespaced file — nothing here edits a file Portage or another package
+# owns.
+#
+# WHY THIS IS NOT OPTIONAL. On a stable profile, several tools in this stack have
+# NO stable-keyworded version in ::gentoo at all, so `emerge` refuses them outright
+# and `core doctor` reports a permanent ✗. Verified on 23.0/desktop:
+#
+#     app-shells/zoxide   5 ebuilds, 0 with a stable amd64 keyword
+#     sys-fs/duf          2 ebuilds, 0 with a stable amd64 keyword
+#
+# Everything in the GURU overlay is testing-keyworded by convention, which is the
+# other ten. Shipping this list commented out — as this file did — meant a fresh
+# box finished "complete" while silently skipping a quarter of the stack.
+#
+# WHAT THIS DELIBERATELY DOES NOT DO: blanket-unmask. There is no `*/* ~amd64`
+# line here and there should never be one. Each atom is listed because this repo
+# installs it and it needs the keyword; an atom that emerges fine on stable is
+# absent on purpose, so it keeps tracking stable.
+#
+# To review before it lands:  ./bootstrap.sh --dry-run
+# To see why one atom is blocked:  emerge -p <category/name>
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ── ::gentoo, but testing-only ────────────────────────────────────────────────
+# No stable keyword exists for these; without the line they cannot install at all.
+app-shells/zoxide ~__ARCH__
+sys-fs/duf ~__ARCH__
+
+# ── ::gentoo dev/repo tooling, testing-only ───────────────────────────────────
+dev-util/shellcheck ~__ARCH__
+dev-util/difftastic ~__ARCH__
+
+# ── GURU overlay ──────────────────────────────────────────────────────────────
+# GURU ships ebuilds testing-keyworded as a matter of policy, so every atom
+# bootstrap.sh emerges from it needs a line here. These are the core-doctor tools
+# absent from the main tree (see PORTING-MATRIX.md footnote 12).
+sys-apps/sd ~__ARCH__
+app-misc/glow ~__ARCH__
+app-misc/gum ~__ARCH__
+net-misc/xh ~__ARCH__
+app-shells/carapace ~__ARCH__
+app-misc/1password-cli ~__ARCH__
+app-misc/tealdeer ~__ARCH__
+app-misc/yazi ~__ARCH__
+dev-vcs/lazygit ~__ARCH__
+app-shells/direnv ~__ARCH__
+net-analyzer/gping ~__ARCH__
+
+# NB: an ebuild carrying NO keywords at all (some live/9999 ebuilds, and the
+# occasional GURU package) is not reached by `~arch` — it needs `**`. Nothing here
+# requires that today. If an atom is still masked after this file lands, run
+# `emerge -p <atom>`: it prints the exact keyword or licence that is missing.

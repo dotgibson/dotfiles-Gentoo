@@ -124,6 +124,8 @@ end of the run rather than scrolling past mid-`emerge`.
 | `--no-sync` | skip the slow `emerge --sync` on re-runs |
 | `--links-only` | re-link configs without touching Portage (needs no privileges) |
 | `--strict` | exit non-zero if any best-effort step failed (use this in CI) |
+| `--no-portage-config` | leave `/etc/portage` alone (keyword/licence-masked atoms are then skipped) |
+| `--no-extras` | skip the five opt-in cargo builds — `ouch`, `ast-grep`, `jnv`, `jj`, `watchexec` |
 | `--only zsh,nvim` | wire ONLY these Core module groups |
 | `--skip tmux` | wire everything EXCEPT these groups |
 
@@ -142,7 +144,11 @@ prompt — comes from vendored Core; this repo owns the Gentoo specifics:
 - `bootstrap.sh` — `emerge` provision + Core/OS symlink wiring (idempotent)
 - `install/packages.txt` — Portage atoms (modern CLI stack)
 - `os/gentoo.zsh` — clipboard + package-manager aliases → `~/.config/zsh/80-os.zsh`
-- `gentoo/package.use.example`, `gentoo/package.accept_keywords.example` — USE-flag and keyword overrides to review and copy to `/etc/portage`
+- `gentoo/package.accept_keywords`, `gentoo/package.license` — **installed** to
+  `/etc/portage/*/90-dotfiles-Gentoo` (skip with `--no-portage-config`). Without
+  them a stable profile cannot install `zoxide`, `duf` or anything from GURU
+- `gentoo/package.use.example` — USE-flag overrides to review and copy by hand
+  (USE is a per-machine choice; bootstrap never sets it)
 - `core/` — vendored from `dotfiles-core` (read-only here; edit upstream)
 
 The things that actually bite on Gentoo — cutting build time (binhost +

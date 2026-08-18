@@ -2,9 +2,11 @@
 # Portage ATOMS (category/name) for the modern terminal stack. One per line.
 # mise (not in the tree) and tree-sitter-cli (cargo) are handled by bootstrap.sh.
 #
-# Heads-up: several modern Rust CLIs may be ~amd64 (testing-keyworded) on a
-# stable profile. If an emerge is blocked by keywords/USE, see
-# gentoo/package.accept_keywords.example and gentoo/package.use.example.
+# Heads-up: several modern Rust CLIs are ~amd64 (testing-keyworded) on a stable
+# profile, and two of them (app-shells/zoxide, sys-fs/duf) have NO stable ebuild at
+# all. bootstrap.sh installs gentoo/package.accept_keywords for exactly those, so
+# this list emerges cleanly on stable; --no-portage-config opts out, and
+# gentoo/package.use.example stays a review-and-copy template (USE is your call).
 # Building from source is slow — enable the binhost (--getbinpkg, see README).
 
 # ── shell + multiplexer ───────────────────────────────────────
@@ -37,22 +39,41 @@ app-misc/yq-go          # yq — mikefarah's GO yq (NOT app-misc/yq, which is th
 #   sys-apps/sd  app-misc/glow  app-misc/gum  net-misc/xh
 #   app-shells/carapace  app-misc/1password-cli (op)
 #   app-misc/tealdeer  app-misc/yazi  dev-vcs/lazygit  app-shells/direnv
+#   net-analyzer/gping
 # Installed via `go install` (not packaged anywhere), handled in bootstrap.sh:
-#   gron  sesh
-# Opt-in tools packaged NOWHERE on Gentoo — not in ::gentoo AND not in GURU, so
-# bootstrap.sh does not install them. Grab them by hand if you want them:
-#   jj (jujutsu) → cargo install --locked jj-cli    shfmt → mise use -g shfmt
-#   The crate is jj-cli, NOT jujutsu: the `jujutsu` crate name is an abandoned stub
-#   (last published 0.7.2) whose description only redirects readers to jj-cli, so
-#   `cargo install jujutsu` gets you the redirect, not the VCS. Detail in
-#   core/PORTING-MATRIX.md, footnote 8 — the canonical source for this.
-# Do NOT add dev-vcs/jujutsu or dev-go/shfmt — neither atom exists (the overlays
-#   that carry shfmt call it dev-util/shfmt, and none of them is GURU).
+#   gron  sesh  shfmt
+#   shfmt is absent from BOTH ::gentoo and GURU (PORTING-MATRIX footnote 7): there
+#   is no dev-go/shfmt atom, and the third-party overlays that carry it call it
+#   dev-util/shfmt. So it takes the go path, like gron and sesh.
+# Built with cargo by bootstrap.sh (packaged nowhere on Gentoo):
+#   tree-sitter-cli  viddy          — always; Core wires both
+#   ouch  ast-grep  jnv  jj  watchexec  — the opt-in set, skipped by --no-extras
+#   The jj crate is jj-cli, NOT jujutsu: the `jujutsu` crate name is an abandoned
+#   stub (last published 0.7.2) whose description only redirects readers to jj-cli,
+#   so `cargo install jujutsu` gets you the redirect, not the VCS. Likewise the
+#   watchexec crate is `watchexec-cli` — note the -cli suffix; plain `watchexec` is
+#   the library and installs no binary. core/PORTING-MATRIX.md footnotes 8 and 25 are canonical for both.
+# Do NOT add dev-vcs/jujutsu or dev-go/shfmt — neither atom exists.
 
 # ── editor + git workflow ─────────────────────────────────────
 app-editors/neovim
 dev-vcs/git             # `git subtree` ships with git on Gentoo
 net-misc/openssh        # client + server (Gentoo ships one package)
+dev-vcs/git-absorb      # `git absorb` — auto-route staged hunks into earlier commits
+dev-util/difftastic     # binary: difft — syntactic diff (core-doctor's `difft` row)
+
+# ── dev / repo tooling the doctor reports on ──────────────────
+# These are in ::gentoo and were simply never listed, so `core doctor` showed a
+# permanent ✗ for each on a fully-provisioned box. Three of the six are already
+# stable on amd64; shellcheck + difftastic take a keyword line (see
+# gentoo/package.accept_keywords).
+dev-util/shellcheck     # shell linter — also what this repo's own CI gate runs
+app-benchmarks/hyperfine  # benchmark a command (the `count` corner next to viddy)
+app-admin/lnav          # log navigator. NB ::gentoo carries 0.11.2, three minors
+                        #   behind upstream — the only version in the tree
+dev-python/uv           # per-project Python envs + tool running; Core's mise config
+                        #   documents the split (mise owns the global interpreter,
+                        #   uv owns .venv) and zsh aliases uvr/uvs against it
 
 # ── clipboard ─────────────────────────────────────────────────
 gui-apps/wl-clipboard   # wl-copy / wl-paste (Wayland)
@@ -71,6 +92,11 @@ dev-python/pip
 # ── Portage helpers (quality of life) ─────────────────────────
 app-portage/gentoolkit  # equery (owns-file), euse, eclean, ...
 app-portage/eix         # fast package search/index (`eix <term>`)
+app-eselect/eselect-repository  # provides `eselect repository`, WITHOUT which the
+                        #   GURU block in bootstrap.sh cannot enable the overlay —
+                        #   and GURU carries ten of the core-doctor tools. A stage3
+                        #   does not ship it, so this was an undeclared dependency
+                        #   of a quarter of the stack.
 
 # ── misc useful ───────────────────────────────────────────────
 net-misc/curl
