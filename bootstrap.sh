@@ -23,6 +23,7 @@ STRICT=0
 DRY=0
 PORTAGE_CONFIG=1
 EXTRAS=1
+USER_MODE=0
 # --only/--skip are validated by the shared lib (blib_select), which is sourced
 # AFTER this loop — so capture the raw values now and apply them below.
 ONLY_RAW="" SKIP_RAW="" ONLY_SEEN=0 SKIP_SEEN=0
@@ -42,6 +43,7 @@ Usage:
   ./bootstrap.sh --strict        # exit non-zero if any best-effort step failed
   ./bootstrap.sh --no-portage-config  # do NOT touch /etc/portage
   ./bootstrap.sh --no-extras     # skip the opt-in source builds (see below)
+  ./bootstrap.sh --user          # install everything into $HOME, no privileges
   ./bootstrap.sh --only zsh,nvim # link ONLY these Core module groups
   ./bootstrap.sh --skip tmux     # link everything EXCEPT these groups
 
@@ -60,6 +62,11 @@ Gentoo notes:
   • MAKEOPTS is set for the run when your make.conf does not set it — Portage
     otherwise compiles single-threaded, which on a source-based distro is the
     difference between minutes and hours.
+  • --user is the no-root path: no emerge, no /etc/portage, nothing outside
+    $HOME. The stack comes from mise (prebuilt binaries), cargo and go instead,
+    and zsh is built from source into ~/.local. It is selected automatically
+    when there is no way to escalate, because the alternative — aborting — leaves
+    an unusable box on an account that simply cannot install packages.
   • Five tools are packaged nowhere on Gentoo and are built with cargo: ouch,
     ast-grep, jnv, jj, watchexec. Nothing in Core wires them by default (every
     one is HAVE_*-gated), so --no-extras skips them for a faster first run —
@@ -78,6 +85,7 @@ while [[ $# -gt 0 ]]; do case "$1" in
   --strict) STRICT=1 ;;
   --no-portage-config) PORTAGE_CONFIG=0 ;;
   --no-extras) EXTRAS=0 ;;
+  --user) USER_MODE=1 ;;
   --only) [[ $# -ge 2 ]] || {
     echo "--only requires module names, e.g. --only zsh,nvim" >&2
     exit 1
@@ -140,11 +148,20 @@ if ((SKIP_SEEN)); then blib_select --skip "$SKIP_RAW"; fi
 # --require only when we are actually going to install something: wiring symlinks
 # needs no privileges at all, so a links-only or dry run on an unprivileged box
 # must still work.
-if ((LINKS_ONLY)) || ((DRY)); then
+if ((LINKS_ONLY)) || ((DRY)) || ((USER_MODE)); then
   blib_resolve_su || true
-else
-  blib_resolve_su --require || exit 1
+elif ! blib_resolve_su --require; then
+  # No escalator, and packages were asked for. Aborting here is the wrong answer:
+  # it is exactly the box --user exists for, and the operator cannot fix it by
+  # re-running with a password they do not have. Fall back, loudly.
+  blib_warn "no way to escalate — falling back to --user (everything into \$HOME, no emerge)"
+  USER_MODE=1
 fi
+# INVARIANT: user mode never escalates. Forcing BLIB_SU empty makes that true by
+# construction rather than by every call site remembering — blib_priv then runs
+# commands directly, and anything genuinely needing root fails as this user
+# instead of sitting on a sudo prompt.
+((USER_MODE)) && export BLIB_SU=""
 
 # ── PATH: the per-user bindirs language installers write into ─────────────────
 # cargo writes $CARGO_HOME/bin and go writes $GOBIN; neither is on a fresh box's
@@ -199,7 +216,7 @@ if blib_is_wsl; then IS_WSL=1; fi
 # process waiting on a TTY read with nothing on screen: no output, no progress,
 # indistinguishable from a hang. Prime it once up front (visibly, at the start) and
 # refresh it in the background until we exit.
-if ((LINKS_ONLY == 0)) && ((DRY == 0)); then
+if ((LINKS_ONLY == 0)) && ((DRY == 0)) && ((USER_MODE == 0)); then
   trap 'blib_sudo_keepalive_stop' EXIT
   blib_sudo_keepalive_start || {
     blib_warn "sudo authentication failed — aborting before provisioning anything"
@@ -480,6 +497,209 @@ install_wsl_conf() {
   blib_ok "wsl.conf written — run 'wsl.exe --shutdown' from Windows, then reopen"
 }
 
+# ══ the no-root path ══════════════════════════════════════════════════════════
+# Everything below installs into $HOME and touches nothing else. It exists because
+# "you need root" is not an answer on an account that will never have root — and
+# because almost none of this stack actually requires it: mise ships prebuilt
+# binaries, cargo and go write into $HOME by default, and zsh builds from source
+# with the toolchain a Gentoo box already has.
+
+# ZSH_PIN / ZSH_SHA256 — zsh is in no binary registry, and it is the ONE hard
+# dependency: without it there is no Core shell at all, so `core doctor` cannot
+# even run. Building it is ~2 minutes with the compiler already present.
+#
+# The tarball is pinned by version AND SHA-256, matching the fleet's existing idiom
+# for unpackaged tools (core/scripts/tool-versions.env pins shellcheck and shfmt
+# the same way). The hash below was taken from the canonical zsh.org tarball and
+# checked against dana's PGP signature (key 7CA7ECAAF06216B90F894146ACF8146CAE8CBBC4,
+# "Good signature") at the time of pinning — so a bump means re-verifying the
+# signature, not just copying a new number.
+ZSH_PIN="5.9.2"
+ZSH_SHA256="36fa734374b44783582cec09bcd67822e2f992c779ec1624ab5596df078d2f81"
+
+_user_build_zsh() {
+  if command -v zsh >/dev/null 2>&1 || [[ -x "$HOME/.local/bin/zsh" ]]; then
+    blib_say "zsh already present — skipping the source build"
+    return 0
+  fi
+  if ! command -v gcc >/dev/null 2>&1 && ! command -v cc >/dev/null 2>&1; then
+    blib_note_fail "zsh: no C compiler — cannot build it, and without zsh none of Core loads"
+    return 0
+  fi
+  local tarball="zsh-${ZSH_PIN}.tar.xz" workdir
+  workdir="$(mktemp -d)" || {
+    blib_note_fail "zsh: could not create a build directory"
+    return 0
+  }
+  blib_say "zsh $ZSH_PIN (source build — no binary release exists for any registry)"
+  (
+    cd "$workdir" || exit 1
+    curl -fsSLO "https://www.zsh.org/pub/$tarball" || exit 1
+    # Verify BEFORE unpacking: a bad tarball must never reach tar, let alone make.
+    printf '%s  %s\n' "$ZSH_SHA256" "$tarball" | sha256sum -c - >/dev/null 2>&1 || exit 2
+    tar xf "$tarball" || exit 1
+    cd "zsh-${ZSH_PIN}" || exit 1
+    ./configure --prefix="$HOME/.local" --enable-multibyte >/dev/null 2>&1 || exit 3
+    make -j"$(nproc 2>/dev/null || echo 2)" >/dev/null 2>&1 || exit 3
+    make install >/dev/null 2>&1 || exit 3
+  )
+  case "$?" in
+    0) blib_ok "zsh $ZSH_PIN installed to ~/.local/bin/zsh" ;;
+    2) blib_note_fail "zsh: SHA-256 mismatch on $tarball — REFUSED (expected $ZSH_SHA256). Not a transient failure; do not retry blindly." ;;
+    3) blib_note_fail "zsh: build failed — see if headers are missing (ncurses), then: cd $workdir && ./configure --prefix=\$HOME/.local && make" ;;
+    *) blib_note_fail "zsh: download or unpack failed — retry later, or build $tarball by hand" ;;
+  esac
+  rm -rf "$workdir" 2>/dev/null || true
+  return 0
+}
+
+# The mise tool manifest goes to conf.d, NEVER to ~/.config/mise/config.toml —
+# that path is a symlink into the vendored core/ subtree, so writing it (which is
+# exactly what `mise use -g` does) would silently edit Core. Same install rules as
+# the /etc/portage files: idempotent, backed up, previewable.
+_user_install_mise_tools() {
+  local src="$DOTFILES/gentoo/mise-tools.toml"
+  local dir="${XDG_CONFIG_HOME:-$HOME/.config}/mise/conf.d"
+  local dst="$dir/10-dotfiles-Gentoo.toml"
+  [[ -r "$src" ]] || {
+    blib_note_fail "user mode: $src is missing — no tool manifest to install"
+    return 0
+  }
+  if [[ -e "$dst" ]] && cmp -s "$src" "$dst"; then
+    blib_say "mise tool manifest already current"
+  elif ((DRY)); then
+    blib_say "would install $dst (the mise tool manifest)"
+  else
+    mkdir -p "$dir"
+    [[ -e "$dst" ]] && cp -p "$dst" "$dst.pre-dotfiles.$(date +%s)"
+    cp "$src" "$dst"
+    blib_ok "mise tool manifest -> $dst"
+  fi
+  ((DRY)) && {
+    blib_say "would run: mise install (prebuilt binaries into ~/.local/share/mise)"
+    return 0
+  }
+  # `mise install` with no argument installs what the merged config DECLARES —
+  # which includes Core's language runtimes. That is deliberate: they are declared
+  # in Core's own config and a box that wants them should get them. auto_install
+  # stays false, so nothing installs behind your back on a `cd`.
+  blib_say "mise install (prebuilt binaries — no compiler, no privileges)"
+  mise install || blib_note_fail "mise install: one or more tools failed — re-run 'mise install' to see which"
+}
+
+# ~/.zshenv — the ordering fix. Core's 00-tools.zsh probes each tool with
+# `command -v` and sets HAVE_* BEFORE it runs `mise activate` later in the same
+# file, so a tool that exists only under mise is invisible to the probe: every
+# HAVE_* stays unset, 20-aliases.zsh skips every guarded alias, and the
+# starship/atuin/zoxide/carapace inits never run. `core doctor` then reports ✓ for
+# all of them (it runs from the prompt, after activation) while the shell uses
+# none of them — measured here as 41 ✓ tools next to `ll='ls -lah'`.
+#
+# That is dotfiles-core#425. The fix must land before the FIRST Core fragment, and
+# both the OS layer (80-os.zsh) and the host layer (99-local.zsh) are far too
+# late — hence .zshenv, which zsh reads first, always. Remove this once Core does
+# it in the entry file it already generates.
+#
+# Written only when absent or when it is still ours to write: a hand-authored
+# .zshenv is left alone, because it is a file this repo does not own.
+_user_write_zshenv() {
+  local rc="$HOME/.zshenv" marker="dotfiles-Gentoo user-mode PATH"
+  if [[ -e "$rc" ]] && ! grep -q "$marker" "$rc" 2>/dev/null; then
+    blib_warn "~/.zshenv exists and is not ours — leaving it alone. For mise-installed tools to be seen by Core's probes, it must put ~/.local/share/mise/shims (and ~/.local/bin, ~/.cargo/bin) on \$PATH."
+    return 0
+  fi
+  if ((DRY)); then
+    blib_say "would write ~/.zshenv (mise shims + user bindirs on PATH before Core loads)"
+    return 0
+  fi
+  cat >"$rc" <<'ZENV'
+# ~/.zshenv — dotfiles-Gentoo user-mode PATH. Read by EVERY zsh, before ~/.zshrc
+# and before any Core fragment. Regenerated by ./bootstrap.sh --user.
+#
+# Core's zsh/00-tools.zsh probes tools with `command -v` and sets HAVE_* BEFORE it
+# runs `mise activate` later in the same file. Without the lines below, a tool that
+# exists only under mise (or cargo, or go) is invisible to that probe: HAVE_* stays
+# unset, every guarded alias in 20-aliases.zsh is skipped, and the starship/atuin/
+# zoxide/carapace inits never run — while `core doctor`, which runs later, reports
+# ✓ for all of them. Upstream: dotfiles-core#425.
+_mise_shims="${XDG_DATA_HOME:-$HOME/.local/share}/mise/shims"
+[[ -d $_mise_shims ]] && path=("$_mise_shims" $path)
+unset _mise_shims
+[[ -d $HOME/.local/bin ]] && path=("$HOME/.local/bin" $path)
+[[ -d $HOME/.cargo/bin ]] && path=("$HOME/.cargo/bin" $path)
+export PATH
+ZENV
+  blib_ok "~/.zshenv written (mise shims + user bindirs ahead of Core's probes)"
+}
+
+# The login shell, without root. blib_set_login_shell runs `chsh -s <zsh>`, but
+# chsh only accepts a shell listed in /etc/shells and adding a line there needs
+# root — so on this account the login shell is stuck as bash and a fresh login
+# never reaches Core. exec'ing from the login profile is the same outcome with no
+# privileges. Appended once, guarded, and reversible by deleting the block.
+_user_login_handoff() {
+  local prof="$HOME/.bash_profile" marker="dotfiles-Gentoo zsh handoff"
+  local zsh_path="$HOME/.local/bin/zsh"
+  [[ -x "$zsh_path" ]] || return 0
+  if [[ -e "$prof" ]] && grep -q "$marker" "$prof" 2>/dev/null; then
+    blib_say "bash->zsh login handoff already installed"
+    return 0
+  fi
+  if ((DRY)); then
+    blib_say "would append a guarded bash->zsh handoff to ~/.bash_profile"
+    return 0
+  fi
+  [[ -e "$prof" ]] && cp -p "$prof" "$prof.pre-dotfiles.$(date +%s)"
+  cat >>"$prof" <<'PROF'
+
+# ── dotfiles-Gentoo zsh handoff ───────────────────────────────────────────────
+# chsh cannot point at a $HOME zsh (it only accepts shells listed in /etc/shells,
+# and editing that needs root), so hand off from the login profile instead.
+# Guards, in order: already-zsh (never loop); interactive only (scp/rcp must not
+# be handed a different shell); a real terminal; the binary actually exists, so a
+# removed zsh leaves a WORKING bash login rather than a machine you cannot log
+# into; and NO_ZSH_HANDOFF=1 as an escape hatch.
+if [[ -z "$ZSH_VERSION" && $- == *i* && -t 1 && -z "$NO_ZSH_HANDOFF" \
+   && -x "$HOME/.local/bin/zsh" ]]; then
+  exec "$HOME/.local/bin/zsh" -l
+fi
+PROF
+  blib_ok "bash->zsh login handoff appended to ~/.bash_profile (NO_ZSH_HANDOFF=1 opts out)"
+}
+
+provision_user() {
+  blib_say "USER MODE — nothing outside \$HOME is touched, and emerge is not used"
+  # mise first: it supplies most of the stack.
+  if ! command -v mise >/dev/null && [[ ! -x "$HOME/.local/bin/mise" ]]; then
+    if ((DRY)); then
+      blib_say "would install mise (official installer)"
+    else
+      blib_say "mise (official installer)"
+      curl -fsSL https://mise.run | sh >/dev/null 2>&1 ||
+        blib_note_fail "mise: installer failed — without it most of the user-mode stack cannot install"
+    fi
+  fi
+  blib_user_bindirs_on_path   # pick up a mise that was just installed
+  _user_install_mise_tools
+  _user_build_zsh
+
+  # The four rows with no mise registry entry. tree-sitter/viddy come from mise in
+  # user mode, so they are not repeated here.
+  if ((DRY)); then
+    blib_say "would cargo-install: procs, git-absorb"
+    blib_say "would go-install: sesh"
+    blib_say "(ouch comes from mise's ubi backend, not cargo — see gentoo/mise-tools.toml)"
+  else
+    _dotfiles_cargo_install procs procs
+    _dotfiles_cargo_install git-absorb git-absorb
+    _dotfiles_go_install github.com/joshmedeski/sesh/v2@latest sesh
+  fi
+
+  _user_write_zshenv
+  _user_login_handoff
+  return 0
+}
+
 provision() {
   # A missing package list is a BROKEN CHECKOUT, not "no atoms to install".
   # blib_read_pkgs reads it with `<"$1"`, which under errexit-exempt command
@@ -610,7 +830,16 @@ wire_links() {
   blib_link_os_layer "$DOTFILES" "$CONFIG" gentoo
   # shellcheck disable=SC2119  # no args is intentional — writes the default module set
   blib_write_zshrc_loader
-  blib_set_login_shell
+  # blib_set_login_shell runs `chsh -s <zsh>`, which needs the shell to be listed
+  # in /etc/shells — a root-only edit. In user mode that is guaranteed to fail, and
+  # it fails EXPENSIVELY: observed burning three sudo password attempts (with the
+  # lockout risk that carries) before warning. _user_login_handoff already covers
+  # the same ground with no privileges, so skip it outright.
+  if ((USER_MODE)); then
+    blib_say "user mode: not touching the login shell (chsh needs /etc/shells, which is root-only) — the ~/.bash_profile handoff does this instead"
+  else
+    blib_set_login_shell
+  fi
   # The local half of the "never hand-edit core/" rule (VENDORING.md). Only
   # sync-core.sh installed this before — i.e. only on the maintainer's machine
   # during a fan-out — so every other clone had no guard at all. It is idempotent
@@ -625,7 +854,13 @@ wire_links() {
   blib_ok "symlinks wired$(blib_selected_note)"
 }
 
-((LINKS_ONLY)) || provision
+if ((LINKS_ONLY)); then
+  :
+elif ((USER_MODE)); then
+  provision_user
+else
+  provision
+fi
 wire_links
 blib_wire_summary
 

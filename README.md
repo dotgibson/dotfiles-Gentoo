@@ -126,12 +126,46 @@ end of the run rather than scrolling past mid-`emerge`.
 | `--strict` | exit non-zero if any best-effort step failed (use this in CI) |
 | `--no-portage-config` | leave `/etc/portage` alone (keyword/licence-masked atoms are then skipped) |
 | `--no-extras` | skip the five opt-in cargo builds — `ouch`, `ast-grep`, `jnv`, `jj`, `watchexec` |
+| `--user` | install everything into `$HOME` — no `emerge`, no `/etc/portage`, no privileges |
 | `--only zsh,nvim` | wire ONLY these Core module groups |
 | `--skip tmux` | wire everything EXCEPT these groups |
 
 Module groups are `zsh nvim tmux git prompt tools`; they affect wiring only, never
 package provisioning. Run `./bootstrap.sh --help` for the full usage. On a fresh
 box, `--dry-run` first is cheap and tells you exactly what the run will do.
+
+### No root on this box?
+
+`emerge` needs privileges. If the account has none — no `sudo`, a locked-down
+work machine, a shared host — `bootstrap.sh --user` installs the whole stack into
+`$HOME` instead, and it is selected **automatically** when there is no way to
+escalate. Aborting would be the wrong answer there: it leaves an unusable box on
+an account that cannot be fixed by re-running with a password.
+
+```sh
+./bootstrap.sh --user      # or just ./bootstrap.sh — it falls back on its own
+```
+
+What changes:
+
+| | privileged run | `--user` |
+| --- | --- | --- |
+| tool stack | `emerge` (39 atoms) + GURU | mise prebuilt binaries (`gentoo/mise-tools.toml`) |
+| gaps | cargo / `go install` | same — `procs`, `git-absorb`, `sesh` |
+| zsh | `app-shells/zsh` | built from source into `~/.local` (pinned + SHA-256 verified) |
+| login shell | `chsh` | a guarded `exec zsh -l` from `~/.bash_profile` — `chsh` cannot name a `$HOME` shell, since `/etc/shells` is root-only |
+| `/etc/portage` | keywords + licence installed | untouched |
+
+It reaches the same place: **41/41 tools and all five integrations wired** in
+`core doctor`, measured on a stable-profile Gentoo box with no `sudo` at all.
+
+Two notes worth knowing. The tool manifest is installed to
+`~/.config/mise/conf.d/`, **never** to `~/.config/mise/config.toml` — that path is
+a symlink into vendored `core/`, so `mise use -g` (mise's own documented gesture)
+would silently edit Core. And `--user` writes a `~/.zshenv` putting mise's shims
+on `$PATH` before Core loads: without it Core's probes run before `mise activate`
+and every `HAVE_*` stays unset, so `core doctor` reports ✓ for tools the shell is
+not actually using ([dotfiles-core#425][c425]).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -147,6 +181,7 @@ prompt — comes from vendored Core; this repo owns the Gentoo specifics:
 - `gentoo/package.accept_keywords`, `gentoo/package.license` — **installed** to
   `/etc/portage/*/90-dotfiles-Gentoo` (skip with `--no-portage-config`). Without
   them a stable profile cannot install `zoxide`, `duf` or anything from GURU
+- `gentoo/mise-tools.toml` — the `--user` tool manifest (mise, prebuilt binaries)
 - `gentoo/package.use.example` — USE-flag overrides to review and copy by hand
   (USE is a per-machine choice; bootstrap never sets it)
 - `core/` — vendored from `dotfiles-core` (read-only here; edit upstream)
@@ -213,6 +248,7 @@ Project Link: [dotgibson](https://github.com/dotgibson/)
 <!-- Markdown Links & Images -->
 [repo-docs]: https://dotgibson.github.io/dotfiles-web/docs/repos/dotfiles-Gentoo
 [porting]: https://dotgibson.github.io/dotfiles-web/docs/reference/porting-matrix
+[c425]: https://github.com/dotgibson/dotfiles-core/issues/425
 [dotgibson-shield]: https://img.shields.io/github/v/release/dotgibson/dotfiles-core?style=flat-square&label=dotgibson&labelColor=181717&logo=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAF1klEQVR4nLSWbUxT7RnHr9PT09MXSltaoC9QXkqR16Iwhb0Iw8VYYE7jPri5aBaZzpmFZbpolpn4QeMyM%2BM%2B7MVt0Q9LNJIlxCzqxGWS6aKAig51vBQKIi3QltpCS0%2Fbc879pD1N3%2Bnz4fG5Pl2977v%2F331d131f5%2BZrddWQZAgAgy9uCRlefICzT6GeIsP%2FXF15kahmu9JglGmLRQoRQdIQWgu77BuWGe%2Fo%2BOqym8odApaWomTT1%2Bl2HqirahaTuJ9kQMggkgYhDRGfRiQDZBi9fuf52%2BD7l1b3ZhRcmq%2FMnBHmibuO7fvWoTalVoDjQRwL8RGgEOtzB0MbtBDnkRjGR0AgTK%2BQfNukr1LKXlhXKZpJSxTKGoFSq9vf16tQ8%2FiEh094Vu0L449mLGMup20DRWuFYVCiFm%2BvU36nTbOlMB%2BnCDxIOBzhvv6nFpc3TS0dUKDRHzh1Jk9O8wlPYN326Oa%2FJobnN8shAOxqKjrdXa8WSnGKWPewR%2FuHLG5P8oKUFJHi%2FH19F6UKEQ%2BnbJap27%2B%2BtWR15VAHgLkV%2F%2F0xW6OuQCfNE4PgmyX6f0xZKYbJDuj43lmtoYqHU%2FaZdwNXr4eoUG51zqgw%2B%2FCtrbm0UCeRynBhqVj2YC4RNC%2FuqStbKkydAODzeO7%2B6QYTpnOIYgB729R729RY9DAGafb0wDOHLwAA5vKK1mJNFoCpsxeLLn%2Fy91uU359719%2FfVXL%2BSM35IzU9rcXciCcQujz0imOfbGhOB0jkGo2hFQBW7Quzr0Zzq6vyBT%2FuKY%2BHErfBmQWLK1Lhr6l1OkleCqC0poPb%2FuTwv3OrA8DPDhgkokgLmLX77o86kqcGJmaj5xjr1JWlAAr1Js75MDEGAAI%2B1mvWX%2F1JY29XmYDPS5ZoNsrM24si1xSh3%2FRbGBYlz%2F73g41ztqliqYv1onyVHgDocMjjXASAKycavlqnZBHa2ajcasjv%2B8MbAPhRV9nI5MezB41crIPPHWOW9Gtl9XhDDCMCokIqSwGQ4shvyucFhEQCnqlSdm9k%2BdKt6XM%2FqO7aof7t8YbIIW5SHdpVIhUTAOAP0L8bmM3MHgJwByidQCgnhSmAqOEYnQ8AgRBr%2FuUzKsgggIs3pyVCfkeTCgAmFtaNOgm39C%2F3511r2W8JYvIAJbIaAwQ3vKAEoVgRaTQIBYKxqxgMs6euvdUXiQDgeHd5rV7K1fb2kC2rOgaYghQBMJ5grI3HUGuuhQiNIOWq8sy%2FLTgCKplgT0ZtCyprWw7%2FvKCyNr6yQqYg8cim59a9KQDnwv84R1%2F99UwAzsMya4vxeOYLN7YePGG%2BcAPjxXS%2BoavknFfOlRTAh8nHKNqLa1v2ZwK6dxQZtHk5ahu3%2FcYmLsoh%2B%2FsUgN%2BztDQzEvkYFBurGnan%2FS1%2B1P98L1FbxLIPzh193X%2FtwbmjiGUBYHd5nVFRCABPlxdtfh%2B3LHGKxof%2Bqo90C6yj58yi9Tm1kWjr94ZXsGhTuDuynAx2z0245yY4X06Kf9HWFd0N%2BuPbsUR64%2B3a57Erig2qIoOIlJSUNE69GWTZRFufXvRNL%2Fo2ywyJE1fMP6xWqHBEP5yfvP7%2FbAAAsFufG01mkVCqkGvLyrbNTD2mw9kfDckmE0oudx9rUZfhiF5Zd%2F%2F00QDF0NkBTJhanB3e0riHJIRKhXarqWfdu%2Bx0WnOot1ftuNR90lhQzEO0L7B2YvCm3b%2BWNI%2ByffSLq757%2BPcquYaIvBtgdcXycuzO9MzTFdccd9IwDNMVlDaXbzPXtxsVhQRDEQzl8i6d%2Buf12Y%2BONDVMo6vOfHWJxHLz3l811u8WAEZABCNAAHSI8n8k2HABKRJjLJ8JECxFMAE%2BHXhiGb7yn35vcCNDKVsEcSuv%2BEpn%2B7Etla0CwAQIOBLBhrkt85kAnwm8mX95e%2FTOa9vUZiIxQI43r0Kura9uN5SYNMoyuVDGZ2nK73C65iy28Rezo44152bSKYAvz3ifVA1lDn0WAAD%2F%2F%2FWvXexgMwqgAAAAAElFTkSuQmCC
 [dotgibson-url]: https://github.com/dotgibson/dotfiles-core/releases/latest
 [ci-shield]: https://img.shields.io/github/actions/workflow/status/dotgibson/dotfiles-Gentoo/lint.yml?branch=main&style=flat-square&logo=githubactions&logoColor=white&label=CI
