@@ -11,7 +11,7 @@ name: claude-routines
 on:
   schedule:
     # Sun 10:00 UTC — a free fleet slot (web is Sat 08:00; core Tue, Defense Wed, htpx
-    # Thu, Kali Fri), staggered 1h off the other OS callers so the fleet never draws on
+    # Thu, Offense Fri), staggered 1h off the other OS callers so the fleet never draws on
     # the Claude subscription at the same time.
     - cron: "0 10 * * 0"
   workflow_dispatch:

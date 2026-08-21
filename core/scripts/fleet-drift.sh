@@ -179,8 +179,9 @@ if [[ -r "$_OS_REPOS_FILE" ]]; then
   done <"$_OS_REPOS_FILE"
 fi
 ((${#OS_REPOS[@]})) || OS_REPOS=(
-  dotfiles-MacBook dotfiles-Alpine dotfiles-Arch dotfiles-Defense
-  dotfiles-Fedora dotfiles-Gentoo dotfiles-Kali dotfiles-openSUSE
+  dotfiles-MacBook dotfiles-Alpine dotfiles-Arch dotfiles-Debian
+  dotfiles-Defense dotfiles-Fedora dotfiles-Gentoo dotfiles-Offense
+  dotfiles-openSUSE
 )
 
 # Read a `key=value` (core.lock) or `key = value` (.core-ref) value from a file.
@@ -308,7 +309,11 @@ printf '%-22s %-20s %s\n' "REPO" "RECORDED" "STATUS"
 printf '%-22s %-20s %s\n' "----" "--------" "------"
 
 _check_repo() { # _check_repo <repo-dir-name> <marker-relative-path> <sha-key> [tag-key] [subtree-path]
-  local name="$1" marker="$2" key="$3" tagkey="${4:-core_tag}" track_path="${5:-}" dir="$ROOT/$1" file rec status tag shown
+  local name="$1" marker="$2" key="$3" tagkey="${4:-core_tag}" track_path="${5:-}" dir file rec status tag shown
+  # By remote URL when the directory name misses (scripts/lib/common.sh :: resolve_repo_dir),
+  # so a repo renamed upstream but still cloned under its old name reports its REAL drift
+  # instead of the "not checked out" that `make sync` cannot repair.
+  dir="$(resolve_repo_dir "$ROOT" "$name")" || dir="$ROOT/$name"
   if [[ ! -d "$dir" ]]; then
     # --strict documents (header, "Exit:") that a not-checked-out repo FAILS. It called fail
     # — bumping the counter and printing red — but never set DRIFT, so the script still

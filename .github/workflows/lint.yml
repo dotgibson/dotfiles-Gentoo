@@ -4,7 +4,7 @@ name: lint
 # (.github/workflows/lint-call.yml) — one definition for the whole fleet, replacing the
 # ~200-line copy this file used to carry. The gate's internals (the SHA-256-verified
 # pinned-tool bootstrap, the core/ exclude, shfmt-advisory) live there now. This repo has no
-# extra excludes (only Kali does), so no `with:` is needed.
+# extra excludes (only Offense does), so no `with:` is needed.
 # NO `paths-ignore`, deliberately. A required status check that does not run is not
 # "skipped" to a ruleset — it stays PENDING and blocks the PR forever, so a gate with
 # a path filter cannot be a required check at all. This is the most valuable gate in

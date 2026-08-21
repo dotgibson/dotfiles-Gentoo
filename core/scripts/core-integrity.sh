@@ -29,7 +29,7 @@
 # Usage:
 #   ./scripts/core-integrity.sh                 # check siblings of this repo
 #   ./scripts/core-integrity.sh --root ~/src    # fleet lives elsewhere
-#   ./scripts/core-integrity.sh --self ../dotfiles-Kali   # check just ONE repo (per-repo CI guard)
+#   ./scripts/core-integrity.sh --self ../dotfiles-Offense   # check just ONE repo (per-repo CI guard)
 #   ./scripts/core-integrity.sh --strict        # a not-checked-out repo FAILS, not skips
 #   ./scripts/core-integrity.sh --quiet         # suppress the ✓ rows; show only problems + summary
 #
@@ -99,8 +99,9 @@ else
     done <"$_OS_REPOS_FILE"
   fi
   ((${#OS_REPOS[@]})) || OS_REPOS=(
-    dotfiles-MacBook dotfiles-Alpine dotfiles-Arch dotfiles-Defense
-    dotfiles-Fedora dotfiles-Gentoo dotfiles-Kali dotfiles-openSUSE
+    dotfiles-MacBook dotfiles-Alpine dotfiles-Arch dotfiles-Debian
+    dotfiles-Defense dotfiles-Fedora dotfiles-Gentoo dotfiles-Offense
+    dotfiles-openSUSE
   )
 fi
 
@@ -133,7 +134,10 @@ printf '%-22s %-14s %s\n' "----" "------" "------"
 
 PROBLEM=0
 _check_repo() { # _check_repo <repo-dir-name>
-  local name="$1" dir="$ROOT/$1" file rec status tag shown
+  local name="$1" dir file rec status tag shown
+  # Same resolution as fleet-drift.sh / sync-core.sh: directory name first, then origin's
+  # URL, so a pre-rename clone directory can't hide a TAMPERED core/ behind "not checked out".
+  dir="$(resolve_repo_dir "$ROOT" "$name")" || dir="$ROOT/$name"
   if [[ ! -d "$dir" ]]; then
     if ((STRICT)); then fail "$(printf '%-22s %-14s %s' "$name" "-" "NOT CHECKED OUT")"; PROBLEM=1
     else skip "$(printf '%-22s %-14s %s' "$name" "-" "not checked out")"; fi

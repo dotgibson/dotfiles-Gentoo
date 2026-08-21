@@ -43,16 +43,20 @@ CORE_BRANCH="${CORE_BRANCH:-main}"
 # same place. Override with CORE_REMOTE if your OS repos use a named remote.
 CORE_REMOTE="${CORE_REMOTE:-$(git -C "$HERE" remote get-url origin 2>/dev/null || echo '')}"
 
-# The fleet that vendors Core. SINGLE SOURCE: scripts/os-repos.txt (B9) — one edit
-# adds an OS target, instead of this array drifting from the README/PORTING-MATRIX.
+# The fleet that vendors Core. SOURCE: scripts/os-repos.txt (B9), so this array cannot
+# drift from the README/PORTING-MATRIX unnoticed.
 # The inline list stays as a hard fallback so a missing/corrupt data file can't strand
 # the maintain button (it degrades to the last-known fleet rather than fanning out to
 # nothing). Lines are trimmed; blanks and `#` comments are dropped.
+# KEEP IT IN STEP with scripts/os-repos.txt — scripts/test-core.sh asserts the two are
+# identical, because a fallback that has silently lost a repo is worse than no fallback:
+# it runs only when the data file is already unreadable.
 # NB: dotfiles-Windows is intentionally NOT here — it's the native host layer (no
 # vendored core/ subtree). See the note in scripts/os-repos.txt.
 ALL_OS_REPOS=(
-  dotfiles-MacBook dotfiles-Alpine dotfiles-Arch dotfiles-Defense
-  dotfiles-Fedora dotfiles-Gentoo dotfiles-Kali dotfiles-openSUSE
+  dotfiles-MacBook dotfiles-Alpine dotfiles-Arch dotfiles-Debian
+  dotfiles-Defense dotfiles-Fedora dotfiles-Gentoo dotfiles-Offense
+  dotfiles-openSUSE
 )
 _OS_REPOS_FILE="$HERE/scripts/os-repos.txt"
 if [[ -r "$_OS_REPOS_FILE" ]]; then
@@ -211,7 +215,10 @@ if ((!DRY)) && ((SYNC_JOBS > 1)) && [[ "$CORE_SHA" != unknown ]]; then
   echo ":: prefetching Core into up to $SYNC_JOBS repos in parallel (merge stays sequential)"
   _pf=0
   for repo in "${TARGETS[@]}"; do
-    path="$REPOS_ROOT/$repo"
+    # Resolved, not string-joined: a repo renamed upstream may still be cloned under its
+    # old directory name (scripts/lib/common.sh :: resolve_repo_dir). Falling back to the
+    # conventional path keeps the "nothing there" case looking exactly as it did.
+    path="$(resolve_repo_dir "$REPOS_ROOT" "$repo")" || path="$REPOS_ROOT/$repo"
     [[ -d "$path/.git" && -d "$path/core" ]] || continue
     git -C "$path" fetch -q "$CORE_REMOTE" "$CORE_BRANCH" >/dev/null 2>&1 &
     _pf=$((_pf + 1))
@@ -317,7 +324,7 @@ _sync_pin_workflows() { # <repo-path> <full-sha> <tag> → prints how many files
 # failure), else updated if its subtree pull ran, else skipped.
 repos_updated=0 repos_skipped=0 repos_failed=0
 for repo in "${TARGETS[@]}"; do
-  path="$REPOS_ROOT/$repo"
+  path="$(resolve_repo_dir "$REPOS_ROOT" "$repo")" || path="$REPOS_ROOT/$repo"
   if [[ ! -d "$path/.git" ]]; then
     skip "$repo (not cloned at $path)"
     repos_skipped=$((repos_skipped + 1))
@@ -338,7 +345,10 @@ for repo in "${TARGETS[@]}"; do
     repos_failed=$((repos_failed + 1))
     continue
   fi
-  echo ":: $repo"
+  # Name the path whenever it ISN'T the conventional one, so a fan-out into a clone
+  # sitting under a pre-rename directory name is visible in the log rather than a
+  # surprise the next time someone reads the git output underneath it.
+  if [[ "$path" == "$REPOS_ROOT/$repo" ]]; then echo ":: $repo"; else echo ":: $repo (at $path)"; fi
   # Snapshot the line-level FAIL counter: any err() emitted inside this repo's body
   # (pull failure, core.lock commit failure) flips the whole repo into the failed bucket.
   _repo_fail0=$FAIL

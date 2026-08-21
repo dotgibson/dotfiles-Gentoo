@@ -79,7 +79,7 @@ The system is three layers, each building on the one below:
 | --- | --- | --- |
 | **Core** | [`dotfiles-core`](https://github.com/dotgibson/dotfiles-core) → vendored into every OS repo's `core/` | zsh, tmux, nvim, git, starship — identical everywhere |
 | **OS-native** | `dotfiles-{MacBook,Windows,Fedora,Arch,openSUSE,Alpine,Gentoo}` (this repo among them) | package manager, clipboard, paths |
-| **Role** | `dotfiles-Kali`, `dotfiles-Defense` | offensive / defensive tooling |
+| **Role** | `dotfiles-Offense`, `dotfiles-Defense` | offensive / defensive tooling |
 
 ### Languages
 

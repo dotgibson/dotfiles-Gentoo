@@ -130,13 +130,15 @@ hdr() { ((QUIET)) || printf '\n%s== %s ==%s\n' "$c_blu" "$*" "$c_rst"; }
 # Both gate scripts gate their SLOW per-area sections on these flags so a per-area run
 # pays only for what it touched. They carried BYTE-IDENTICAL copies of this parser — the
 # exact "two copies that drift" pattern this lib exists to kill — so it lives here once.
-# FAIL-CLOSED default: unset → both areas on (full run). An empty or unknown scope token
-# fails SAFE to the full run rather than silently narrowing a gate on the 9-repo fan-out.
+# FAIL-CLOSED default: unset → every area on (full run). An empty or unknown scope token
+# fails SAFE to the full run rather than silently narrowing a gate on the 10-repo fan-out.
 : "${SCOPE_SHELL:=1}"
 : "${SCOPE_NVIM:=1}"
-_set_scope() { # _set_scope <comma-list: shell,nvim | all | none>
+: "${SCOPE_ATUIN:=1}"
+_set_scope() { # _set_scope <comma-list: shell,nvim,atuin | all | none>
   SCOPE_SHELL=0
   SCOPE_NVIM=0
+  SCOPE_ATUIN=0
   local tok had=0 prog="${0##*/}"
   local IFS=,
   for tok in $1; do
@@ -144,15 +146,25 @@ _set_scope() { # _set_scope <comma-list: shell,nvim | all | none>
     case "$tok" in
     shell) SCOPE_SHELL=1 ;;
     nvim) SCOPE_NVIM=1 ;;
+    # `atuin` is the hermetic self-test of scripts/verify-atuin-guard.sh — the premise
+    # DETECTOR's own harness, not shipped Core (it is absent from core.manifest and nothing
+    # vendors it). Its own axis because it is by far the most expensive thing the suite
+    # does — measured at 197s of a 286s run, 68% — while being unreachable from almost
+    # every change that pays for it. The real measurement, against live upstream atuin,
+    # runs weekly in .github/workflows/atuin-guard-verify.yml; this axis only decides
+    # whether the STUB-driven self-test also runs on a given push.
+    atuin) SCOPE_ATUIN=1 ;;
     all | full)
       SCOPE_SHELL=1
       SCOPE_NVIM=1
+      SCOPE_ATUIN=1
       ;;
     none) ;;
     *) # unknown token → run EVERYTHING (fail-safe), matching ci.yml's safe default
       printf '%s: unknown scope %s — running full (fail-safe)\n' "$prog" "$tok" >&2
       SCOPE_SHELL=1
       SCOPE_NVIM=1
+      SCOPE_ATUIN=1
       ;;
     esac
   done
@@ -162,6 +174,7 @@ _set_scope() { # _set_scope <comma-list: shell,nvim | all | none>
     printf '%s: empty scope — running full (fail-safe)\n' "$prog" >&2
     SCOPE_SHELL=1
     SCOPE_NVIM=1
+    SCOPE_ATUIN=1
   }
 }
 
@@ -178,16 +191,22 @@ _seed_plugin_dirs() { # _seed_plugin_dirs <parent-dir>
   done
 }
 
-# Read ci-classify.sh's two-line `shell=<bool>`/`nvim=<bool>` contract into
-# CLASSIFY_SHELL/CLASSIFY_NVIM. Returns NON-ZERO when either key is missing or not a
-# clean true/false (a classifier error or garbage) — so the caller can fail SAFE to the
-# full run rather than trust a half-parsed verdict. ONE reader for the contract the audit
-# (`--changed`) consumes, instead of re-implementing the sed parse + validation per site.
+# Read ci-classify.sh's three-line `shell=<bool>`/`nvim=<bool>`/`atuin=<bool>` contract into
+# CLASSIFY_SHELL/CLASSIFY_NVIM/CLASSIFY_ATUIN. Returns NON-ZERO when ANY of the three keys is
+# missing or not a clean true/false (a classifier error or garbage) — so the caller can fail
+# SAFE to the full run rather than trust a half-parsed verdict. ONE reader for the contract the
+# audit (`--changed`) consumes, instead of re-implementing the sed parse + validation per site.
 _core_read_classify() { # _core_read_classify <classifier-output>
   CLASSIFY_SHELL="$(printf '%s\n' "$1" | sed -n 's/^shell=//p')"
   CLASSIFY_NVIM="$(printf '%s\n' "$1" | sed -n 's/^nvim=//p')"
+  CLASSIFY_ATUIN="$(printf '%s\n' "$1" | sed -n 's/^atuin=//p')"
   case "$CLASSIFY_SHELL" in true | false) ;; *) return 1 ;; esac
   case "$CLASSIFY_NVIM" in true | false) ;; *) return 1 ;; esac
+  # Validated exactly as strictly as the other two, deliberately. Defaulting a missing or
+  # malformed `atuin=` to false would read a classifier this reader cannot parse as
+  # "skip the most expensive gate" — the silent-skip failure mode ci-classify.sh's whole
+  # fail-closed design exists to invert. A garbage line fails here and the caller runs full.
+  case "$CLASSIFY_ATUIN" in true | false) ;; *) return 1 ;; esac
   return 0
 }
 
@@ -333,4 +352,58 @@ _audit_ls() { # _audit_ls <pathspec>… — content-gate file set, deduped
     git ls-files -- "$@" 2>/dev/null
     git ls-files --others --exclude-standard -- "$@" 2>/dev/null
   } | sort -u
+}
+
+# ── fleet-member resolution: by DIRECTORY NAME, then by REMOTE URL ─────────────
+# scripts/os-repos.txt names the fleet by repo NAME, and sync-core.sh, fleet-drift.sh
+# and core-integrity.sh all turned that name into a path by string-joining it onto the
+# repos root. That coupling is invisible right up until a repo is RENAMED upstream: a
+# box still holding the clone under its old directory name has the right remote, the
+# right subtree and the right core.lock, and the fan-out skips it anyway — reporting
+# "not cloned" for a repo that is sitting right there. dotfiles-Kali → dotfiles-Offense
+# hit exactly this, and the only remedy on offer was "go `mv` the directory", on every
+# machine, forever, for every future rename.
+#
+# So: keep the directory-name lookup as the fast path (it is right ~always, and costs no
+# process), and fall back to asking each sibling clone what it actually IS. git remotes
+# follow a rename automatically, so the clone's origin URL is the durable identity that
+# the directory name only approximates.
+#
+# bash 3.2-safe (no associative arrays, no ${var,,}) — this runs on macOS too.
+
+_repo_slug_of() { # _repo_slug_of <dir> — lowercased repo name from <dir>'s origin URL
+  local url
+  url="$(git -C "$1" remote get-url origin 2>/dev/null)" || return 1
+  [[ -n "$url" ]] || return 1
+  url="${url%/}"      # a trailing slash would otherwise eat the whole name
+  url="${url##*[/:]}" # both URL shapes at once: https://host/owner/repo AND git@host:owner/repo
+  url="${url%.git}"
+  [[ -n "$url" ]] || return 1
+  # Case-fold: GitHub repo names are case-INSENSITIVE, so a clone of `dotfiles-offense`
+  # is the same repo as `dotfiles-Offense` and must not read as a different one.
+  printf '%s' "$url" | tr '[:upper:]' '[:lower:]'
+}
+
+resolve_repo_dir() { # resolve_repo_dir <root> <repo-name> — echo the clone path, or return 1
+  local root="$1" name="$2" want dir slug
+  [[ -n "$root" && -n "$name" ]] || return 1
+  # Fast path, and deliberately `-d` on the directory rather than on its .git: this must
+  # stay byte-identical to the string-join it replaces, so a conventional layout resolves
+  # exactly as before (including to a path that exists but is not a repo — the callers
+  # each have their own .git/core.lock checks and must keep making that call themselves).
+  [[ -d "$root/$name" ]] && {
+    printf '%s\n' "$root/$name"
+    return 0
+  }
+  # Fallback: no directory of that name, so look for a clone that says it IS this repo.
+  want="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"
+  for dir in "$root"/*; do
+    # `-e`, not `-d`: .git is a FILE in a worktree or a submodule checkout.
+    [[ -e "$dir/.git" ]] || continue
+    slug="$(_repo_slug_of "$dir")" || continue
+    [[ "$slug" == "$want" ]] || continue
+    printf '%s\n' "$dir"
+    return 0
+  done
+  return 1
 }
