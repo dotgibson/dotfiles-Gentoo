@@ -9,7 +9,9 @@
 #
 #   • install/packages.txt: "Do NOT add dev-vcs/jujutsu or dev-go/shfmt — neither
 #     atom exists"  ← a nonexistent atom emerges as a `skipped:` line, i.e. it
-#     looks exactly like a keyword mask and is never fixed.
+#     looks exactly like a keyword mask and is never fixed. Still true, and now
+#     sharper: dev-vcs/jj IS packaged and this repo emerges it, so the trap was
+#     never "jj is unavailable" — it was the SPELLING.
 #   • "direnv is GURU-only on Gentoo (app-shells/direnv, NOT dev-util/direnv,
 #     which does not exist)"  ← same failure, wrong category.
 #   • app-shells/zoxide and sys-fs/duf have NO stable ebuild, so on a stable
@@ -35,6 +37,11 @@
 #                    to packages.txt), and is reachable on a stable profile
 #   6. dead keys   — an accept_keywords line whose atom exists in NEITHER tree.
 #                    That line unmasks nothing; it is how gum stayed invisible.
+#   7. extras list — every atom bootstrap.sh emerges from its opt-in extras block
+#                    (the extras_install call) exists in ::gentoo and is reachable
+#                    on a stable profile — the same three checks as 1-3, applied to
+#                    a list that also lives in the script. These come from the MAIN
+#                    tree, not the overlay, so unlike 5-6 this one always runs.
 #
 # Checks 5 and 6 need the GURU overlay. Point GURU_TREE at a checkout, or sync it
 # (eselect repository enable guru && emaint sync -r guru). Without it they SKIP —
@@ -70,7 +77,11 @@ for _arg in "$@"; do
     --quiet) QUIET=1 ;;
     --require-tree) REQUIRE_TREE=1 ;;
     -h | --help)
-      sed -n '2,47p' "${BASH_SOURCE[0]}"
+      # NB a hard-coded range over this file's OWN header: growing the checks
+      # list above silently truncates --help mid-sentence, and nothing tests it.
+      # The end line is the `GURU_TREE=...` usage line — re-derive it after any
+      # edit to the header rather than adjusting it by arithmetic.
+      sed -n '2,54p' "${BASH_SOURCE[0]}"
       exit 0
       ;;
     *)
@@ -144,46 +155,69 @@ while IFS= read -r line; do
 done <"$PKGS"
 say "atoms: ${#atoms[@]}"
 
-# ── the GURU list, read from the guru_install CALL in bootstrap.sh ─────────────
-# Parsed rather than duplicated here on purpose: a second copy of the list is a
+# ── the atom lists bootstrap.sh hard-codes, read from the CALLS themselves ─────
+# Parsed rather than duplicated here on purpose: a second copy of a list is a
 # second thing to forget, and it would have agreed with the first that gum was
-# fine. This reads the arguments of the actual call — the definition line
+# fine. This reads the arguments of the actual call — a definition line
 # (`guru_install() {`) is excluded by requiring whitespace or a line-end after the
 # name, and comments are stripped, so a mention in prose cannot smuggle an atom in.
-guru_atoms=()
-while IFS= read -r line; do
-  [[ -n "$line" ]] && guru_atoms+=("$line")
-done < <(awk '
-  function emit(s,   n, f, i) {
-    sub(/#.*/, "", s)
-    n = split(s, f, /[[:space:]]+/)
-    for (i = 1; i <= n; i++)
-      if (f[i] != "" && f[i] != "\\") print f[i]
-  }
-  {
-    line = $0
-    if (!collecting) {
-      if (line ~ /^[[:space:]]*guru_install[[:space:]]*\\?[[:space:]]*$/ ||
-          line ~ /^[[:space:]]*guru_install[[:space:]]+[^(]/) {
-        sub(/^[[:space:]]*guru_install/, "", line)
-        collecting = 1
-      } else next
+#
+# Parameterised by callee name because there are now two such lists: guru_install
+# (checks 5-6) and extras_install (check 7). The regexes are built as strings in
+# BEGIN so the name can vary; "\\\\" is one literal backslash in a dynamic regex.
+_atoms_from_call() { # <function-name>
+  awk -v fn="$1" '
+    BEGIN {
+      re_alone = "^[[:space:]]*" fn "[[:space:]]*\\\\?[[:space:]]*$"
+      re_args  = "^[[:space:]]*" fn "[[:space:]]+[^(]"
+      re_strip = "^[[:space:]]*" fn
     }
-    cont = (line ~ /\\[[:space:]]*$/)
-    emit(line)
-    if (!cont) collecting = 0
-  }
-' "$BOOTSTRAP")
-say "guru atoms: ${#guru_atoms[@]} (from the guru_install call in bootstrap.sh)"
+    function emit(s,   n, f, i) {
+      sub(/#.*/, "", s)
+      n = split(s, f, /[[:space:]]+/)
+      for (i = 1; i <= n; i++)
+        if (f[i] != "" && f[i] != "\\") print f[i]
+    }
+    {
+      line = $0
+      if (!collecting) {
+        if (line ~ re_alone || line ~ re_args) {
+          sub(re_strip, "", line)
+          collecting = 1
+        } else next
+      }
+      cont = (line ~ /\\[[:space:]]*$/)
+      emit(line)
+      if (!cont) collecting = 0
+    }
+  ' "$BOOTSTRAP"
+}
 
 # A parser that finds nothing is indistinguishable from a clean bill of health,
 # which is the exact shape of bug this whole script exists to refuse. bootstrap.sh
-# HAS a guru_install call; if we cannot see its arguments the parser has drifted
-# and must fail loudly rather than pass silently.
-if ((${#guru_atoms[@]} == 0)); then
-  err "parsed 0 atoms from the guru_install call in $BOOTSTRAP — the parser has drifted from the script (or the call was removed); refusing to pass without checking it"
+# HAS both calls; if we cannot see the arguments of one, the parser has drifted
+# and must fail loudly rather than pass silently. NB this makes "the call exists,
+# with at least one atom" a contract: if the last atom is ever removed from one of
+# these lists, delete its call site AND its guard here, in the same commit.
+_require_atoms() { # <count> <function-name>
+  (($1)) && return 0
+  err "parsed 0 atoms from the $2 call in $BOOTSTRAP — the parser has drifted from the script (or the call was removed); refusing to pass without checking it"
   exit 1
-fi
+}
+
+guru_atoms=()
+while IFS= read -r line; do
+  [[ -n "$line" ]] && guru_atoms+=("$line")
+done < <(_atoms_from_call guru_install)
+say "guru atoms: ${#guru_atoms[@]} (from the guru_install call in bootstrap.sh)"
+_require_atoms "${#guru_atoms[@]}" guru_install
+
+extras_atoms=()
+while IFS= read -r line; do
+  [[ -n "$line" ]] && extras_atoms+=("$line")
+done < <(_atoms_from_call extras_install)
+say "extras atoms: ${#extras_atoms[@]} (from the extras_install call in bootstrap.sh)"
+_require_atoms "${#extras_atoms[@]}" extras_install
 
 # ── the keyword list we ship (atom names only; __ARCH__ is rendered at install) ─
 keyworded=()
@@ -236,6 +270,7 @@ _has_stable() {
 rc=0
 missing=() unstable_uncovered=() stale=()
 guru_missing=() guru_uncovered=() guru_graduated=() dead_keys=()
+extras_missing=() extras_uncovered=()
 
 for atom in ${atoms[@]+"${atoms[@]}"}; do
   # 1. shape
@@ -306,6 +341,29 @@ if ((GURU_OK)); then
   done
 fi
 
+# 7. The opt-in extras block. Same three questions as checks 1-3 — these atoms
+# come from ::gentoo, not the overlay — so this is NOT inside the GURU_OK gate
+# above: it needs nothing the packages.txt loop did not already have. It is a
+# separate loop rather than atoms appended to that one so the messages can name
+# where the atom came from; "overlay atoms do not belong in packages.txt" would be
+# actively wrong advice for an atom that is not in packages.txt at all.
+for atom in ${extras_atoms[@]+"${extras_atoms[@]}"}; do
+  if [[ "$atom" != */* ]]; then
+    err "$atom — not a category/name atom in the extras_install call"
+    rc=1
+    continue
+  fi
+  if [[ ! -d "$TREE/$atom" ]]; then
+    extras_missing+=("$atom")
+    rc=1
+    continue
+  fi
+  if ! _has_stable "$atom" && ! _is_keyworded "$atom"; then
+    extras_uncovered+=("$atom")
+    rc=1
+  fi
+done
+
 ((${#missing[@]} == 0)) || {
   err "not in ::gentoo (typo, wrong category, or overlay-only — overlay atoms do not belong in packages.txt):"
   printf '        %s\n' "${missing[@]}" >&2
@@ -313,6 +371,14 @@ fi
 ((${#unstable_uncovered[@]} == 0)) || {
   err "no stable keyword for $ARCH and no line in gentoo/package.accept_keywords — a stable profile CANNOT install these:"
   printf '        %s\n' "${unstable_uncovered[@]}" >&2
+}
+((${#extras_missing[@]} == 0)) || {
+  err "bootstrap.sh's opt-in extras block emerges these, but they are not in ::gentoo — a GURU-only atom belongs in the guru_install call instead, and an atom in neither tree is the app-misc/gum bug again:"
+  printf '        %s\n' "${extras_missing[@]}" >&2
+}
+((${#extras_uncovered[@]} == 0)) || {
+  err "emerged by bootstrap.sh's opt-in extras block with no stable keyword for $ARCH and no line in gentoo/package.accept_keywords — a stable profile CANNOT install these:"
+  printf '        %s\n' "${extras_uncovered[@]}" >&2
 }
 ((${#stale[@]} == 0)) || {
   warn "these have gone stable — the accept_keywords line is now dead weight and can be dropped:"
@@ -337,9 +403,9 @@ fi
 
 if ((rc == 0)); then
   if ((GURU_OK)); then
-    say "OK — every atom (packages.txt + the GURU list) exists and is installable on a stable $ARCH profile"
+    say "OK — every atom (packages.txt + the extras block + the GURU list) exists and is installable on a stable $ARCH profile"
   else
-    say "OK — every packages.txt atom exists and is installable on a stable $ARCH profile (GURU absent: the guru_install list was NOT checked)"
+    say "OK — every packages.txt and extras-block atom exists and is installable on a stable $ARCH profile (GURU absent: the guru_install list was NOT checked)"
   fi
 else
   err "packages.txt / accept_keywords need attention (see above)"

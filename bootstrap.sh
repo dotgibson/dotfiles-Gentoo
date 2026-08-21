@@ -67,10 +67,12 @@ Gentoo notes:
     and zsh is built from source into ~/.local. It is selected automatically
     when there is no way to escalate, because the alternative — aborting — leaves
     an unusable box on an account that simply cannot install packages.
-  • Five tools are packaged nowhere on Gentoo and are built with cargo: ouch,
-    ast-grep, jnv, jj, watchexec. Nothing in Core wires them by default (every
-    one is HAVE_*-gated), so --no-extras skips them for a faster first run —
-    at the cost of a ✗ next to each in `core doctor`. The tools Core DOES wire
+  • Five tools are optional extras, skipped by --no-extras. Four are packaged
+    nowhere on Gentoo and are built with cargo (ouch, ast-grep, jnv, watchexec);
+    jj is dev-vcs/jj from ::gentoo (~arch — see gentoo/package.accept_keywords)
+    and is emerged like any other atom. Nothing in Core wires them by default
+    (every one is HAVE_*-gated), so --no-extras is a faster first run — at the
+    cost of a ✗ next to each in `core doctor`. The tools Core DOES wire
     (tree-sitter, viddy, gron, sesh, shfmt) are always installed.
   • A keyword/USE-masked atom is skipped, reported, and never fatal; the run
     ends with a list of everything that did not complete. --strict turns that
@@ -336,6 +338,18 @@ guru_install() {
   fi
 }
 
+# ── the opt-in extras that ARE packaged: a named seam for the gate ────────────
+# extras_install is a one-line pass-through to emerge_install and exists for one
+# reason: scripts/check-packages.sh validates the atoms bootstrap.sh emerges by
+# parsing the CALL, not by keeping a second copy of the list (a second copy is a
+# second thing to forget — it is how app-misc/gum survived). Calling
+# emerge_install directly from the extras block would be unparseable: it is also
+# called as `emerge_install "${atoms[@]}"` in two other places, so a parser aimed
+# at that name emits `"${atoms[@]}"` as a bogus atom and fails the shape check.
+# A distinct name gives the gate an unambiguous target, exactly as guru_install
+# already does — and costs one line.
+extras_install() { emerge_install "$@"; }
+
 # ── cargo-install fallback: Rust CLIs packaged nowhere on Gentoo ───────────────
 # Same shape as _dotfiles_go_install below: guarded on the binary already existing
 # (which now WORKS, because blib_user_bindirs_on_path put ~/.cargo/bin on PATH —
@@ -343,10 +357,16 @@ guru_install() {
 # and records a failure rather than printing one into the scroll.
 #
 # The crate name is NOT always the binary name and getting it wrong is silent:
-# `jj-cli` provides `jj` (the `jujutsu` crate is an abandoned stub that just
-# redirects), and `watchexec-cli` provides `watchexec` (plain `watchexec` is the
-# library — installing it gives you no binary at all). Both are documented in
-# core/PORTING-MATRIX.md, footnotes 8 and 25.
+# `watchexec-cli` provides `watchexec` — plain `watchexec` is the library and
+# installing it gives you no binary at all (core/PORTING-MATRIX.md footnote 25).
+#
+# jj used to be the other example here (`jj-cli`, because the `jujutsu` crate is
+# an abandoned redirect stub). It is gone from this function on purpose: ::gentoo
+# packages the VCS as dev-vcs/jj, so the extras block emerges the atom and this
+# function is never passed a jj crate name. The trap is still real and still
+# documented — .github/ISSUE_TEMPLATE/feature_request.md keeps `jj-cli → jj` as
+# its example — but a live warning about an argument that no longer exists is a
+# comment describing a former state, which is the bug this repo keeps fixing.
 _dotfiles_cargo_install() { # <crate> <binary-name>
   [ "$#" -ge 2 ] || return 0
   if command -v "$2" >/dev/null 2>&1; then return 0; fi
@@ -820,9 +840,13 @@ provision() {
     blib_say "would install mise / tree-sitter-cli / viddy where missing"
     blib_say "would go-install: gron, sesh, shfmt"
     if ((EXTRAS)); then
-      blib_say "would cargo-build the opt-in set: ouch, ast-grep, jnv, jj, watchexec"
+      # --dry-run promises the full plan, so name both paths: "emerged" vs "built
+      # from source" is the single most operationally relevant difference between
+      # them (one honours --getbinpkg, the other can only ever compile locally).
+      blib_say "would emerge the opt-in atom: dev-vcs/jj (~arch — see gentoo/package.accept_keywords)"
+      blib_say "would cargo-build the opt-in set: ouch, ast-grep, jnv, watchexec"
     else
-      blib_say "--no-extras: would skip ouch / ast-grep / jnv / jj / watchexec"
+      blib_say "--no-extras: would skip dev-vcs/jj, and ouch / ast-grep / jnv / watchexec"
     fi
     ((IS_WSL)) && install_wsl_conf
     return 0
@@ -894,18 +918,45 @@ provision() {
   _dotfiles_go_install github.com/joshmedeski/sesh/v2@latest sesh
   _dotfiles_go_install mvdan.cc/sh/v3/cmd/shfmt@latest shfmt
 
-  # ── opt-in source builds (--no-extras skips these) ───────────────────────────
-  # Packaged nowhere on Gentoo. Every one is HAVE_*-gated in Core, so skipping them
-  # costs nothing but a ✗ in `core doctor` — which is precisely why they were never
-  # installed and the doctor was never clean. jj is additive and never replaces git.
+  # ── opt-in extras (--no-extras skips these) ──────────────────────────────────
+  # Every one is HAVE_*-gated in Core, so skipping them costs nothing but a ✗ in
+  # `core doctor` — which is precisely why they were never installed and the
+  # doctor was never clean. jj is additive and never replaces git.
+  #
+  # Four cargo crates packaged nowhere on Gentoo, plus ONE that IS packaged. jj
+  # comes from ::gentoo (dev-vcs/jj, ~arch) rather than `cargo install jj-cli`
+  # because that hands Portage the upgrade, puts the binary in /usr/bin, and lets
+  # a binhost supply it — `cargo install` can only ever compile it locally.
+  #
+  # It stays HERE rather than moving up to install/packages.txt: packages.txt is
+  # the UNCONDITIONAL emerge, and jj is opt-in — an atom there would install on a
+  # --no-extras run, which is the one thing that flag promises not to do.
   if ((EXTRAS)); then
+    extras_install dev-vcs/jj
+    # Migration wart: a box bootstrapped before this change has ~/.cargo/bin/jj from
+    # `cargo install jj-cli`, and Core puts ~/.cargo/bin AHEAD of /usr/bin on PATH
+    # (blib_user_bindirs_on_path). The emerge above succeeds, `jj` still resolves to
+    # the stale cargo build, and nothing will ever upgrade it — silent, and it looks
+    # like it worked.
+    #
+    # Say so; do NOT remove it. ~/.cargo/bin is the operator's, not ours, and a
+    # bootstrap that deletes a binary it did not install is one you cannot trust.
+    # blib_warn and NOT blib_note_fail: note_fail feeds --strict, and this is a
+    # leftover from an earlier run rather than a step of THIS one that failed —
+    # note_fail would make --strict permanently red on every provisioned box, for
+    # a condition we have deliberately chosen not to fix automatically.
+    #
+    # Inside the EXTRAS branch on purpose: under --no-extras nothing emerges
+    # /usr/bin/jj, so the cargo binary shadows nothing and the advice is noise.
+    if [[ -x "$HOME/.cargo/bin/jj" ]]; then
+      blib_warn "jj: ~/.cargo/bin/jj (an old 'cargo install jj-cli') shadows the emerged /usr/bin/jj on PATH and will never be upgraded — remove it with: cargo uninstall jj-cli"
+    fi
     _dotfiles_cargo_install ouch ouch
     _dotfiles_cargo_install ast-grep ast-grep
     _dotfiles_cargo_install jnv jnv
-    _dotfiles_cargo_install jj-cli jj
     _dotfiles_cargo_install watchexec-cli watchexec
   else
-    blib_say "--no-extras: skipping ouch / ast-grep / jnv / jj / watchexec"
+    blib_say "--no-extras: skipping dev-vcs/jj, and ouch / ast-grep / jnv / watchexec"
   fi
 
   # ── WSL: install /etc/wsl.conf. No systemd=true — Gentoo defaults to OpenRC. ──

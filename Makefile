@@ -54,7 +54,7 @@ fmt: ## Apply the 2-space shfmt style (advisory in CI, never blocking)
 	@command -v shfmt >/dev/null || { echo "shfmt not installed (bootstrap.sh go-installs it)"; exit 1; }
 	@shfmt -i 2 -w $(SH_FILES) && echo "formatted $(words $(SH_FILES)) file(s)"
 
-check-packages: ## Verify every atom (packages.txt + the GURU list) exists and installs on a stable profile
+check-packages: ## Verify every atom (packages.txt + the extras block + the GURU list) exists and installs on a stable profile
 	@./scripts/check-packages.sh
 
 dry-run: ## Preview a full bootstrap without changing anything

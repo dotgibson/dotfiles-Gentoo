@@ -1,6 +1,7 @@
 # .github/workflows/packages.yml
 # Gate the package set against REAL Portage trees — install/packages.txt against
-# ::gentoo, and bootstrap.sh's guru_install list against the GURU overlay.
+# ::gentoo, and the two atom lists bootstrap.sh hard-codes: guru_install against
+# the GURU overlay, extras_install against ::gentoo.
 #
 # Not a reusable caller: this check is Gentoo-only by nature (no other repo in the
 # fleet has atoms, keywords or a stable/testing split), so there is nothing to
@@ -25,10 +26,11 @@ on:
       - 'install/packages.txt'
       - 'gentoo/package.accept_keywords'
       - 'scripts/check-packages.sh'
-      # bootstrap.sh carries the guru_install list, which checks 5-6 validate. A
-      # phantom atom added there is exactly the bug this gate now catches, so a
-      # change to it has to trigger the gate — otherwise the check that exists to
-      # catch it never runs on the commit that introduces it.
+      # bootstrap.sh carries two atom lists — guru_install (checks 5-6) and the
+      # opt-in extras_install (check 7). A phantom atom added to either is exactly
+      # the bug this gate now catches, so a change to it has to trigger the gate —
+      # otherwise the check that exists to catch it never runs on the commit that
+      # introduces it.
       - 'bootstrap.sh'
       - '.github/workflows/packages.yml'
   push:
