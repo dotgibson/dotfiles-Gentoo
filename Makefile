@@ -1,69 +1,105 @@
-# dotfiles-Gentoo/Makefile
+# Makefile — a discoverable façade over the existing entry points.
 # ──────────────────────────────────────────────────────────────────────────────
-# Local entry points for the checks CI runs, so a change can be verified BEFORE
-# it is pushed. This repo had none: every check lived in a reusable workflow in
-# dotfiles-core, which meant the only way to find out whether a change was good
-# was to push it and wait.
-#
-# `make lint` deliberately mirrors dotfiles-core's lint-call.yml — same file
-# selection (git ls-files, core/ excluded), same SHELLCHECK_OPTS, same advisory
-# shfmt. If the two ever disagree, this one is wrong: the reusable workflow is
-# the gate, this is the local echo of it.
-#
-# NB core.lock is written by dotfiles-core's sync-core.sh during a fan-out, not
-# here — its own header tells you to run `make core-lock`, a target that has never
-# existed in an OS repo (upstream: dotfiles-core#454). Deliberately not faking it:
-# deriving core_sha locally without the Core remote would produce a lock that
-# looks authoritative and is guessed.
+# This adds NO logic: every target shells out to the real script (scripts/*.sh,
+# pre-commit), which stay the single source of truth. It exists so a newcomer can
+# type `make` and see how to lint, test, audit, and sync — instead of grepping the
+# README for scripts/ paths. The audit (`make audit`) is the one gate; CI and
+# pre-commit call the same scripts/audit-core.sh, so `make audit` == green CI.
 # ──────────────────────────────────────────────────────────────────────────────
-SHELL := /bin/bash
 .DEFAULT_GOAL := help
-
-# core/ is excluded everywhere: it is vendored and gated upstream by its own CI.
-SH_FILES := $(shell git ls-files '*.sh' ':!:core/**')
-ZSH_FILES := $(shell git ls-files '*.zsh' ':!:core/**')
-export SHELLCHECK_OPTS := -e SC1090 -e SC1091 -e SC2015 -e SC2088
-
-.PHONY: help lint shellcheck syntax fmt check-packages dry-run doctor secrets all
+.PHONY: help setup doctor audit audit-changed test bench profile bench-atuin bench-atuin-systemd verify-atuin-guard verify-atuin-guard-autostart lint sync sync-dry fleet-drift core-integrity parity-check freshness-dashboard hooks update-hooks update-plugins update-nvim-plugins update-tool-checksums check-pins check-modern release tag publish release-notes
 
 help: ## Show this help
-	@echo "dotfiles-Gentoo — local checks"
-	@echo
-	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
-		| awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
-	@echo
-	@echo "Repo-owned shell: $(words $(SH_FILES)) .sh, $(words $(ZSH_FILES)) .zsh (core/ excluded)"
+	@echo "dotfiles-core — make targets:"
+	@grep -E '^[a-z][a-zA-Z0-9_-]+:.*## ' $(MAKEFILE_LIST) \
+		| sed -E 's/:.*## /\t/' | sort | awk -F'\t' '{printf "  \033[36m%-13s\033[0m %s\n", $$1, $$2}'
 
-all: lint check-packages ## Everything CI can check locally
+setup: ## One-command dev bootstrap (pre-commit hooks + version doctor + audit) — start here
+	@./scripts/setup.sh
 
-lint: shellcheck syntax ## shellcheck + bash -n + zsh -n (mirrors the CI gate)
+doctor: ## Read-only triage: are the dev tools present and matching the pins? (no install, no audit)
+	@./scripts/setup.sh --doctor
 
-shellcheck: ## Lint repo-owned bash with the fleet's SHELLCHECK_OPTS
-	@command -v shellcheck >/dev/null || { echo "shellcheck not installed (emerge dev-util/shellcheck)"; exit 1; }
-	@echo "shellcheck $(SH_FILES)"
-	@shellcheck $(SH_FILES)
+audit: ## Run the full Core audit (manifest, exec-bits, syntax, lint, behavioral) — the one gate
+	@./scripts/audit-core.sh
 
-syntax: ## Parse-check every repo-owned shell file
-	@rc=0; for f in $(SH_FILES); do echo "bash -n $$f"; bash -n "$$f" || rc=1; done; \
-	if command -v zsh >/dev/null; then \
-		for f in $(ZSH_FILES); do echo "zsh -n $$f"; zsh -n "$$f" || rc=1; done; \
-	else echo "zsh not installed — skipping zsh -n"; fi; \
-	exit $$rc
+audit-changed: ## Audit only what your git diff touches (fast dev loop; same classifier as CI)
+	@./scripts/audit-core.sh --changed
 
-fmt: ## Apply the 2-space shfmt style (advisory in CI, never blocking)
-	@command -v shfmt >/dev/null || { echo "shfmt not installed (bootstrap.sh go-installs it)"; exit 1; }
-	@shfmt -i 2 -w $(SH_FILES) && echo "formatted $(words $(SH_FILES)) file(s)"
+test: ## Run only the behavioral tests (load-order smoke + function units)
+	@./scripts/test-core.sh
 
-check-packages: ## Verify every atom (packages.txt + the extras block + the GURU list) exists and installs on a stable profile
-	@./scripts/check-packages.sh
+bench: ## Benchmark Core's contribution to zsh startup (needs hyperfine; skips if absent)
+	@./scripts/bench-core.sh
 
-dry-run: ## Preview a full bootstrap without changing anything
-	@./bootstrap.sh --dry-run
+profile: ## Per-module zsh startup breakdown (attributes the total cost; slowest first)
+	@./scripts/bench-core.sh --profile
 
-doctor: ## Run core doctor in a Core shell (needs a completed bootstrap)
-	@command -v zsh >/dev/null || { echo "zsh not installed — run ./bootstrap.sh first"; exit 1; }
-	@zsh -ic 'core doctor' || true
+bench-atuin: ## Measure atuin write latency, daemon off vs on, under contention (needs atuin; skips if absent)
+	@./scripts/bench-atuin-daemon.sh
 
-secrets: ## Scan the repo-owned tree for committed secrets
-	@command -v gitleaks >/dev/null || { echo "gitleaks not installed — see .gitleaks.toml for what this would run"; exit 1; }
-	@gitleaks detect --no-banner --redact --config .gitleaks.toml
+bench-atuin-systemd: ## Same, but through a transient systemd user unit (skips without a user bus)
+	@./scripts/bench-atuin-daemon.sh --systemd
+
+verify-atuin-guard: ## Re-measure the silent-discard premise _core_atuin_daemon_guard rests on (0 holds / 1 moved / 3 unmeasurable)
+	@./scripts/verify-atuin-guard.sh
+
+verify-atuin-guard-autostart: ## Same three verdicts for the OTHER premise: does atuin self-heal its daemon under ATUIN_DAEMON__AUTOSTART? (SPAWNS a real daemon)
+	@./scripts/verify-atuin-guard.sh --premise autostart
+
+lint: audit ## Alias for `audit` (the audit IS the lint+test gate)
+
+sync: ## Subtree-pull Core into every OS repo (THE maintain button) — writes to sibling repos
+	@./scripts/sync-core.sh
+
+sync-dry: ## Show what `sync` would do, touching nothing
+	@./scripts/sync-core.sh --dry-run
+
+fleet-drift: ## Report which OS repos (+ Windows) lag the latest RELEASED Core tag — the vendoring-drift dashboard
+	@./scripts/fleet-drift.sh
+
+core-integrity: ## Verify every OS repo's vendored core/ is pristine (not hand-edited) vs its core.lock
+	@./scripts/core-integrity.sh
+
+parity-check: ## Verify PARITY.md's aligned rows hold across zsh + pwsh (needs sibling dotfiles-Windows)
+	@./scripts/parity-check.sh
+
+freshness-dashboard: ## Compose the weekly fleet-health board (drift + integrity + pins) as markdown
+	@./scripts/freshness-dashboard.sh
+
+hooks: ## Install the pre-commit hooks into this clone
+	@command -v pre-commit >/dev/null 2>&1 || { echo "pre-commit not found: pip install pre-commit"; exit 1; }
+	@pre-commit install
+
+update-hooks: ## Bump pinned pre-commit hook revisions to upstream latest (pre-commit autoupdate)
+	@command -v pre-commit >/dev/null 2>&1 || { echo "pre-commit not found: pip install pre-commit"; exit 1; }
+	@pre-commit autoupdate
+
+update-plugins: ## Roll the pinned zsh-plugin SHAs in zsh/45-plugins.zsh to upstream HEAD (deliberate bump)
+	@./scripts/update-plugins.sh
+
+update-nvim-plugins: ## Roll the pinned nvim plugin commits in nvim/lazy-lock.json forward (deliberate bump)
+	@./scripts/update-nvim-plugins.sh
+
+update-tool-checksums: ## Recompute the pinned CI tool SHA-256s in tool-versions.env after a version bump
+	@./scripts/update-tool-checksums.sh
+
+check-pins: ## Report whether the zsh-plugin + nvim pins are behind upstream (the weekly freshness gate)
+	@./scripts/update-plugins.sh --check && ./scripts/update-nvim-plugins.sh --check
+
+check-modern: ## Check CI meets the modern floor (scripts/modern-baseline.yml) — also run inside `make audit`
+	@./scripts/check-modern.sh
+
+release: ## Cut a release: bump core.version + CHANGELOG, run the audit (usage: make release VERSION=X.Y.Z)
+	@./scripts/release.sh $(VERSION)
+
+tag: ## Release phase 1: commit core.version + CHANGELOG (creates NO tag — see publish)
+	@./scripts/tag-release.sh
+
+publish: ## Release phase 2: tag origin/main + push, AFTER the release PR has merged
+	@./scripts/tag-release.sh --publish
+
+release-notes: ## Draft a GitHub Release body from Conventional Commits since the last release (needs git-cliff)
+	@command -v git-cliff >/dev/null 2>&1 || { echo "git-cliff not found: cargo install git-cliff (or scoop/pkg). Config: cliff.toml"; exit 1; }
+	@_from=$$(git log --grep='^release v' --format=%H -1); \
+	  if [ -n "$$_from" ]; then git-cliff "$$_from..HEAD"; else git-cliff; fi
