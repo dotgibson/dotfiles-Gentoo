@@ -44,6 +44,76 @@ commit (`git tag -a vX.Y.Z -m vX.Y.Z`).
     again. `watchexec`'s Gentoo cell also moves `GURU²⁵` → `cargo²⁵`: GURU carries 2.5.0, but
     the bootstrap routes around it and builds `watchexec-cli` for upstream-latest.
 
+- **`direnv` is installed by six of the fleet's seven package lists and had no row in the
+  matrix at all.** (`dotgibson/dotfiles-openSUSE#89`) The `/os-package-availability` audit of
+  `dotfiles-openSUSE` reported it as its one coverage gap rather than drift: `direnv` appeared
+  in `PORTING-MATRIX.md` only inside footnote ¹², as one of the Gentoo GURU atoms. So a reader
+  asking "what is direnv called on Alpine" found nothing, and the next audit comparing a
+  package list against the table found a name the table did not know. It has a row now, and it
+  sits next to `mise` rather than in alphabetical order — this table has never been
+  alphabetical, and the two are the same mechanism: both are `_cache_eval`'d hook generators
+  emitted from `os/<distro>.zsh` at band 80, and Core's own `examples/mise.project.toml` calls
+  mise's `[env]` block "the direnv replacement" and its `[hooks]` block "the other half of
+  direnv".
+
+  Six of the seven cells are a bare `direnv`, verified 2026-08-21 against each distro's own
+  index: Arch `extra` 2.37.1-1, Alpine `community` 2.37.1-r7 (v3.24 — a Go binary, so a native
+  musl build), openSUSE Tumbleweed 2.37.1 with Leap 16.0 and 16.1 both at 2.34.0 through
+  Backports (`bp160.1.13` / `bp161.1.9`, both arches), kali-rolling 2.37.1-1, Ubuntu 24.04
+  `universe` 2.32.1-2ubuntu0.24.04.3 and Debian trixie 2.32.1-2+b16. Gentoo is the exception
+  and is GURU-only — `app-shells/direnv` at 2.37.1, no `::gentoo` atom, and `dev-util/direnv`
+  does not exist — so that cell reads `` `app-shells/direnv` ``¹², where the warning already
+  lived and which therefore needed no edit.
+
+  New footnote ³² records what makes the row unlike its neighbours, because no existing
+  footnote shape fits it. It is not ²¹'s "available, not installed" — six repos install it —
+  and not ¹⁷/¹⁹'s detect-only, because **Core does not detect it at all**: there is no
+  `HAVE_DIRENV`, no alias and no `core-doctor` row. It is the only row in the table wired by
+  the OS layer instead of by Core; the `direnv hook zsh` that makes it work is emitted by each
+  OS repo's `os/<distro>.zsh` at band 80. Core's one stake is `starship/starship.toml`'s
+  `[direnv]` module, which Core switches on (`disabled = false` — starship ships it off by
+  default) so `.envrc` state is visible rather than a directory silently waiting on
+  `direnv allow`. `dotfiles-Offense` (Kali) is the single fleet gap, and it is structural
+  rather than a judgment about direnv — that repo carries no `install/packages.txt` and, since
+  band 80 moved to the OS repo underneath it, no `os/` layer, so nothing there installs the
+  package or evaluates the hook.
+
+  One version floor is recorded because it is the only point where a frozen archive touches
+  Core: starship runs `direnv status --json`, and the `--json` flag is **silently ignored below
+  direnv 2.33.0** — `src/modules/direnv.rs` says so and parses the text output instead. Every
+  target above clears that floor except `dotfiles-Debian`'s two lanes, both on 2.32.1. It
+  degrades rather than breaks, which is why that repo's `install/packages.txt` declares no
+  `# min:` floor for it.
+
+- **Footnote ¹⁹ said both that Gentoo's `bootstrap.sh` emerges `gping` and that it does not.**
+  (#568) #565 rewrote the footnote's opening to record that `dotfiles-Gentoo` really does emerge
+  `net-analyzer/gping` from GURU in its `guru_install` pass — and that naming the atom only in a
+  `packages.txt` comment is a pointer to that call rather than a decline. Its closing sentence
+  was left behind still saying the opposite: "unlike the ¹² atoms `bootstrap.sh` does **not**
+  emerge it, so enable GURU per ¹² and `emerge net-analyzer/gping` by hand." A reader who got to
+  the end of the footnote was told to do by hand what the bootstrap had already done, and the
+  "unlike the ¹² atoms" framing inverted the actual relationship — the same rewrite had just
+  added `gping` to ¹²'s GURU list, so it is one of them.
+
+  The tail now agrees with the head: GURU-only, no main-tree atom, emerged **like** the ¹²
+  atoms in the same `guru_install` pass, nothing left to do by hand. Verified against
+  `dotfiles-Gentoo/bootstrap.sh`, where `net-analyzer/gping` is the last atom in that call.
+
+- **Footnote ²¹ claimed Kali installs `ast-grep`, and the `ast-grep` row's `³` rested on that
+  claim.** (#569) The note carved out an explicit exception — "Kali **does** install `ast-grep`
+  (`bootstrap.sh`, cargo best-effort), which is why that one cell keeps its ³ while its Gentoo
+  neighbour does not" — which is why the Kali column kept a `cargo³` there after `ouch`,
+  `jujutsu` and `lazygit` lost theirs in the same pass. There is no such install.
+  `dotfiles-Offense`'s `bootstrap.sh` contains no `ast-grep` at all, and its only two `cargo`
+  mentions are the comment and `export` that put `~/.cargo/bin` on PATH for tools an operator
+  added by hand — which is precisely the ²¹ contract, not a ³ one.
+
+  This mattered beyond the prose because ³ means "`bootstrap.sh` installs it best-effort", so a
+  ³ with no installer behind it reads as "you will get this" and delivers nothing — the exact
+  overclaim ²¹ was written to correct, surviving inside ²¹ itself for one tool. The `ast-grep`
+  Kali cell is now `cargo²¹`, matching `ouch` and `jujutsu` in that column, and the list of
+  cells that previously overclaimed a `³` gains `ast-grep` on Kali alongside Gentoo.
+
 ## [v4.14.0] - 2026-08-21
 
 ### Changed
@@ -197,7 +267,8 @@ commit (`git tag -a vX.Y.Z -m vX.Y.Z`).
   only for a box that opted in. Being packaged made the _instruction_ wrong, not the policy —
   wiring it into the per-repo bootstrap remains the tracked follow-up it already was.
 
-- **`PORTING-MATRIX.md`'s openSUSE story was written for Leap 15.6, which is EOL.** (#89)
+- **`PORTING-MATRIX.md`'s openSUSE story was written for Leap 15.6, which is EOL.**
+  (`dotgibson/dotfiles-openSUSE#89`)
   Four passages still described a release nobody runs; two of them gave advice that is now
   wrong rather than merely dated. All figures below were verified against the `repo/oss`
   binary indexes for Leap 16.0, Leap 16.1 and Tumbleweed on 2026-08-21 — both arches, since
