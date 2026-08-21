@@ -125,7 +125,7 @@ end of the run rather than scrolling past mid-`emerge`.
 | `--links-only` | re-link configs without touching Portage (needs no privileges) |
 | `--strict` | exit non-zero if any best-effort step failed (use this in CI) |
 | `--no-portage-config` | leave `/etc/portage` alone (keyword/licence-masked atoms are then skipped) |
-| `--no-extras` | skip the five opt-in cargo builds — `ouch`, `ast-grep`, `jnv`, `jj`, `watchexec` |
+| `--no-extras` | skip the five opt-in tools — `ouch`, `ast-grep`, `jnv`, `watchexec` (cargo builds) and `jj` (`dev-vcs/jj`, emerged) |
 | `--user` | install everything into `$HOME` — no `emerge`, no `/etc/portage`, no privileges |
 | `--only zsh,nvim` | wire ONLY these Core module groups |
 | `--skip tmux` | wire everything EXCEPT these groups |
@@ -237,9 +237,10 @@ with no stable keyword that `gentoo/package.accept_keywords` does not cover — 
 two mistakes this repo has actually made, both previously caught only by hand and
 written up as a comment warning the next person.
 
-It also reads the `guru_install` list out of `bootstrap.sh` and checks it the same
-way against the GURU overlay, because a third mistake got made in the one place the
-first two checks could not see: `app-misc/gum` sat in that list for months with no
+It also reads the two atom lists `bootstrap.sh` hard-codes and checks them the same
+way — `guru_install` against the GURU overlay, and the opt-in `extras_install`
+against `::gentoo` — because a third mistake got made in the one place the first
+two checks could not see: `app-misc/gum` sat in that list for months with no
 ebuild in either tree, failing every run, while the `accept_keywords` line we
 shipped for it made the tally's "needs a keyword" advice look already taken. So the
 gate now also rejects a keyword line whose atom exists in neither tree — the line

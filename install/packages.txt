@@ -52,14 +52,29 @@ app-misc/yq-go          # yq — mikefarah's GO yq (NOT app-misc/yq, which is th
 #   is no dev-go/shfmt atom, and the third-party overlays that carry it call it
 #   dev-util/shfmt. So it takes the go path, like gron and sesh.
 # Built with cargo by bootstrap.sh (packaged nowhere on Gentoo):
-#   tree-sitter-cli  viddy          — always; Core wires both
-#   ouch  ast-grep  jnv  jj  watchexec  — the opt-in set, skipped by --no-extras
-#   The jj crate is jj-cli, NOT jujutsu: the `jujutsu` crate name is an abandoned
-#   stub (last published 0.7.2) whose description only redirects readers to jj-cli,
-#   so `cargo install jujutsu` gets you the redirect, not the VCS. Likewise the
-#   watchexec crate is `watchexec-cli` — note the -cli suffix; plain `watchexec` is
-#   the library and installs no binary. core/PORTING-MATRIX.md footnotes 8 and 25 are canonical for both.
+#   tree-sitter-cli  viddy               — always; Core wires both
+#   ouch  ast-grep  jnv  watchexec       — the opt-in set, skipped by --no-extras
+#   The watchexec crate is `watchexec-cli` — note the -cli suffix; plain
+#   `watchexec` is the library and installs no binary at all
+#   (core/PORTING-MATRIX.md footnote 25 is canonical).
+# Emerged by bootstrap.sh's opt-in extras block, NOT from this file:
+#   dev-vcs/jj
+#   jj IS packaged. ::gentoo gained dev-vcs/jj on 2025-12-04 (EAPI 8, maintainer
+#   chutzpah@gentoo.org), so bootstrap.sh emerges the atom instead of building the
+#   jj-cli crate — Portage owns the upgrade, the binary lands in /usr/bin, and a
+#   binhost can supply it, none of which `cargo install` can do. Every ebuild is
+#   ~amd64 with no stable version, hence the line in gentoo/package.accept_keywords.
+#   It is deliberately NOT listed in this file: this list is the UNCONDITIONAL
+#   emerge, and jj is opt-in — an atom here would install on a --no-extras run.
+#   Do not "fix" that by moving it up; scripts/check-packages.sh check 7 already
+#   validates it in place, read out of the extras_install call in bootstrap.sh.
 # Do NOT add dev-vcs/jujutsu or dev-go/shfmt — neither atom exists.
+#   dev-vcs/jujutsu has never existed and still does not: the VCS is dev-vcs/jj.
+#   (The `jujutsu` CRATE is likewise an abandoned stub, last published 0.7.2, whose
+#   description only redirects to jj-cli — so neither spelling of "jujutsu" gets
+#   you the tool, on either packaging path.)
+#   dev-go/shfmt is the same trap one category over — see the go-install block
+#   above for why shfmt has no atom on either tree.
 
 # ── editor + git workflow ─────────────────────────────────────
 app-editors/neovim

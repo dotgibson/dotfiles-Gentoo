@@ -38,6 +38,18 @@ sys-fs/duf ~__ARCH__
 dev-util/shellcheck ~__ARCH__
 dev-util/difftastic ~__ARCH__
 
+# ── ::gentoo, opt-in extras block in bootstrap.sh ─────────────────────────────
+# NOT from install/packages.txt: bootstrap.sh's opt-in extras block emerges this
+# one (skipped by --no-extras), so it is the only atom in this file whose source
+# list lives in the script rather than in packages.txt. scripts/check-packages.sh
+# check 7 reads it from the extras_install call, the same way checks 5-6 read the
+# guru_install list.
+#
+# ::gentoo gained dev-vcs/jj on 2025-12-04. All four ebuilds (0.40.0 - 0.44.0)
+# are KEYWORDS="~amd64" with no stable version, so without this line the emerge
+# is refused outright — the same shape as zoxide and duf above.
+dev-vcs/jj ~__ARCH__
+
 # ── GURU overlay ──────────────────────────────────────────────────────────────
 # GURU ships ebuilds testing-keyworded as a matter of policy, so every atom
 # bootstrap.sh emerges from it needs a line here. These are the core-doctor tools
