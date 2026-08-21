@@ -1,29 +1,25 @@
 ---
 name: Feature request
-about: A tool, alias, or bootstrap behaviour to add to the Gentoo layer
+about: Propose a new Core file or a change to an existing one
 title: "feat: "
 labels: enhancement
 ---
 
-## What, and what it replaces
+## What do you want to add or change?
 
-<!-- If it is a tool: what classic command does it replace, and what does it do
-     that the current one doesn't? -->
+A clear description of the proposal.
 
-## Layer
+## Is it actually Core?
 
-- [ ] Gentoo-specific — Portage atoms, USE flags, GURU, `/etc/portage` (belongs here)
-- [ ] Identical on every distro — belongs in [dotfiles-core] instead
-- [ ] Changes with the operator/engagement — belongs in a role repo
+Core is the config that is **identical on every machine** and **not** offensive
+tooling. Confirm it passes the three-layer test (see CONTRIBUTING.md):
 
-## Packaging on Gentoo
+- [ ] It is identical on every machine (not OS-specific: no package manager,
+      paths, or clipboard logic).
+- [ ] It is not offensive/engagement tooling (that lives in `dotfiles-Offense`).
+- [ ] If it's a new file, I'll add its path to `core.manifest` (the contract).
 
-<!-- Which of these, and the exact atom or crate:
-       ::gentoo            category/name, and whether it is stable on amd64
-       GURU overlay        category/name
-       cargo / go install  the CRATE or module path — these differ from the binary
-                           name often enough to be a trap (jj-cli → jj,
-                           watchexec-cli → watchexec)
-       nowhere             say so; it may still be worth a documented manual path -->
+## Why
 
-[dotfiles-core]: https://github.com/dotgibson/dotfiles-core
+What this enables, or what pain it removes. Since a change here fans out to all
+nine OS repos, note any blast radius worth weighing.

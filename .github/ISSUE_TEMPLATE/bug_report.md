@@ -1,33 +1,40 @@
 ---
 name: Bug report
-about: Something in the Gentoo layer is broken — bootstrap, an atom, an alias
+about: A Core file is broken, behaves wrong, or fails the audit
 title: "bug: "
 labels: bug
 ---
 
 <!--
-Is it actually a Gentoo problem? Anything under core/ (zsh modules, nvim, tmux,
-git config, the bootstrap-lib scaffold) is VENDORED from dotfiles-core and is
-overwritten on the next sync — file those at dotgibson/dotfiles-core.
-This repo owns: bootstrap.sh, install/packages.txt, os/gentoo.*, gentoo/*, wsl/.
+Reminder: this is the Core layer, vendored into nine OS repos via git subtree.
+If the problem is OS-specific (package manager, paths, clipboard) it belongs in
+the OS repo; if it's offensive/engagement tooling, it belongs in dotfiles-Offense.
+See CONTRIBUTING.md for the three-layer test.
 -->
 
 ## What's wrong
 
-## Box
+A clear description of the bug.
 
-- profile: <!-- eselect profile show -->
-- arch / `ARCH`:
-- WSL or bare metal:
-- `core.lock` `core_version`:
+## Which Core file(s)
+
+e.g. `zsh/00-tools.zsh`, `scripts/audit-core.sh`, `nvim/lua/gerrrt/...`
 
 ## How to reproduce
 
-```console
-$ ./bootstrap.sh --dry-run
+Steps, or a minimal command. If it's a load-order/runtime break, the output of:
+
+```bash
+./scripts/audit-core.sh        # the one gate
+./scripts/test-core.sh         # behavioral (load-order + function units)
 ```
 
-<!-- If an atom failed to emerge, the useful output is `emerge -p <category/name>`:
-     it names the exact keyword, licence or USE that is blocking. -->
+## Expected vs actual
 
-## What you expected
+What you expected, and what happened instead.
+
+## Environment
+
+- OS / distro:
+- zsh version (`zsh --version`):
+- Relevant tool versions (shellcheck, luacheck, …):

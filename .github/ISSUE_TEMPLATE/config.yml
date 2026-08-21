@@ -1,10 +1,8 @@
-# A blank issue on an OS repo is usually a Core issue in disguise. The templates
-# route that decision explicitly.
+# Force a template choice — a blank issue on the keystone repo usually means it
+# belonged in an OS repo or dotfiles-Offense instead. The two templates above route
+# that decision via the three-layer test.
 blank_issues_enabled: false
 contact_links:
-  - name: Shared shell / editor / tmux config (Core)
-    url: https://github.com/dotgibson/dotfiles-core/issues
-    about: "Anything under core/ is vendored from dotfiles-core and is not fixable here — file it there."
   - name: Security report
-    url: https://github.com/dotgibson/dotfiles-Gentoo/security/advisories
+    url: https://github.com/security/advisories
     about: "Do not file security issues publicly — use private vulnerability reporting (see SECURITY.md)."

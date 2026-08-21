@@ -1,45 +1,34 @@
 # Security Policy
 
-`dotfiles-Gentoo` is the **OS-native layer for Gentoo** in a three-layer dotfiles
-system. It ships configuration and one provisioning script; it is not a running
-service and stores no credentials.
+`dotfiles-core` ships **configuration only** — shell modules, a Neovim tree, tmux,
+git, starship, and mise. It is not a running service and stores no credentials or
+machine state (see `.gitignore`: secrets, `*.bak`, and `zsh/99-local.zsh` never get
+tracked). Even so, this repo is the keystone of an eleven-repo system: it is vendored
+into every OS repo via `git subtree`, so a defect here **fans out N-way**. That
+makes two classes of issue worth a security report rather than a normal issue:
 
-Two things here are nevertheless worth a security report rather than a normal
-issue, because both run with elevated privileges or touch machine trust:
-
-- **`bootstrap.sh`** runs `emerge` under `sudo`/`doas`, writes files under
-  `/etc/portage` and `/etc/wsl.conf`, and installs binaries from `cargo`,
-  `go install`, and the `mise` upstream installer. Anything that could redirect
-  one of those to an attacker-controlled source, or escalate beyond the steps it
-  declares, is a vulnerability — not a bug.
-- **a tracked file leaking a secret.** `.gitignore` keeps SSH keys, `.env*`, and
-  `*.pre-dotfiles.*` backups out of the tree, and `ssh/config` is the only file
-  under `ssh/` that is tracked. A committed key or token is a security report.
-
-`core/` is a **vendored copy of [dotfiles-core]** and is not maintained here. A
-vulnerability in a `core/` file should be reported against that repo — it fans out
-to every OS repo in the fleet, so fixing it here would fix exactly one of them.
+- a tracked file that leaks a secret, token, or other sensitive value, and
+- a Core script (`bin/clip*`, `maint/dotfiles-maint.sh`, `tmux/scripts/*`, or the
+  `scripts/*.sh` dev tooling) that can be coerced into running untrusted input on a
+  consumer's or maintainer's machine.
 
 ## Reporting a vulnerability
 
-**Please do not open a public issue.** Use GitHub's private vulnerability
-reporting: the **Security** tab → **Report a vulnerability**.
+**Please do not open a public issue for a security report.** Use GitHub's private
+vulnerability reporting instead: the **Security** tab → **Report a vulnerability**.
+That keeps the details private until a fix has been synced out to the OS repos.
 
 Include, where you can:
 
-- the file and line, and whether it sits in the OS layer or in vendored `core/`,
-- how it is reached (a `bootstrap.sh` step, a shell alias, a symlinked config),
-- what privilege it runs with, and
+- the file and line involved, and which Core layer it sits in,
+- how it is reached at runtime (sourced module, `bin/` script, tmux popup, …), and
 - a minimal reproduction.
 
-## Scope notes
+You can expect an acknowledgement within a few days. A confirmed fix lands here
+first, then propagates to each OS repo on the next `./scripts/sync-core.sh`.
 
-- **Not in scope:** the third-party tools this repo installs (`emerge` atoms, GURU
-  overlay packages, crates, Go modules). Report those upstream — though if this
-  repo installs a package from a source that is *itself* wrong (a typosquatted
-  crate, an overlay that is not GURU), that very much is in scope.
-- **Keyword and licence files** under `gentoo/` are installed to `/etc/portage`.
-  They are per-atom by design; a change that broadened one to `*/*` would be a
-  security-relevant regression.
+## Scope
 
-[dotfiles-core]: https://github.com/dotgibson/dotfiles-core/security/policy
+In scope: anything tracked in this repository. Out of scope: the OS-native repos
+(`dotfiles-{MacBook,Windows,Fedora,…}`) and `dotfiles-Offense` — report issues that
+are specific to those layers in their own repositories.
