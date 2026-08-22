@@ -11,6 +11,10 @@
 # ~/.config/zsh/99-local.zsh, outside the repo, and is not something a .gitignore
 # rule here could ever match.
 
-# private SSH material — track ssh/config only, never keys
+# private SSH material — deny-by-default, and nothing here is tracked any more.
+# The ssh CLIENT CONFIG moved into Core (dotgibson/dotfiles-core#450): it is now
+# core/ssh/config, symlinked by blib_link_core. Keep this rule: it means a key
+# dropped under ssh/ is untracked unless someone deliberately allowlists it, which
+# is the safe direction to be wrong in. An OS-specific ssh need is ssh/os.conf
+# (linked to ~/.ssh/config.d/50-os.conf) and would need its own ! line here.
 ssh/*
-!ssh/config

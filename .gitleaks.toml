@@ -16,12 +16,13 @@ paths = ['''^core/''']
 [[allowlists]]
 description = """
 Documentation that deliberately shows the SHAPE of a secret. These are
-placeholders and templates, not values: ssh/config names key PATHS (never key
-material, and .gitignore keeps everything under ssh/ except config itself), and
-the README carries a base64 data: URI for a badge logo, which the default entropy
-rules read as a high-entropy blob.
+placeholders and templates, not values: the README carries a base64 data: URI for a
+badge logo, which the default entropy rules read as a high-entropy blob.
+
+The ssh/config entry that used to sit here is gone with the file — the client config
+moved into Core (dotgibson/dotfiles-core#450) and is scanned there. .gitignore now
+ignores ssh/ entirely, so nothing under it is tracked to allowlist.
 """
 paths = [
-  '''^ssh/config$''',
   '''^README\.md$''',
 ]
