@@ -38,3 +38,10 @@ jobs:
     with:
       image: gentoo/stage3:latest
       prep: "grep -qE \"^ID='?gentoo\" /etc/os-release 2>/dev/null || echo \"ID='gentoo'\" >> /etc/os-release"
+      # Run provision() for real, with package managers and downloaders replaced by
+      # logging no-ops (dotgibson/dotfiles-core#575). --links-only returns BEFORE
+      # provision() is entered, so package installation, retries, upstream installers,
+      # repo/key setup and every failure path around them were executed by no gate
+      # anywhere. A green run means provision() ran and RETURNED, and wire_links still
+      # happened after it — not that provisioning works: nothing is really installed.
+      provision_stub: true

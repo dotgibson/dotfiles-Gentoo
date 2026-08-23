@@ -367,6 +367,85 @@ _core_return_trap_hits() { # _core_return_trap_hits <file>
                              if (l !~ /^[[:space:]]*#/ && l !~ dis) print $1 }'
 }
 
+# ── _core_owned_block_hits: portable logic that Core owns, re-implemented locally ──
+# _core_owned_block_hits <file> — print `<line>:<rule-id>` for every place <file>
+# re-implements a block Core now owns. Silence = clean. Consumed by the reusable
+# .github/workflows/lint-call.yml, which runs it over each caller repo's own *.zsh.
+#
+# WHY THIS EXISTS. Seven OS repos each hand-maintained a copy of the direnv/gh/uv/ty init
+# block, and six a copy of the WSL probe — entirely portable zsh, maintained N times, and
+# already drifted into three variants of one block by the time anyone counted (#449). Core
+# took both over. Nothing stops a repo re-adding them: the duplicate is valid zsh, `zsh -n`
+# passes it, and the shell keeps working (the second copy is a redundant re-source, not an
+# error) — so the drift would come back invisibly, exactly as it arrived. audit-core.sh §5c
+# catches OS-specifics leaking INTO Core; this is the missing other direction.
+#
+# ONE ASYMMETRY WORTH STATING, because it differs from _core_return_trap_hits above: that
+# rule holds for Core's own tree too, so audit-core.sh §5e runs it here. THIS one does NOT,
+# and must not — Core's zsh/00-tools.zsh and zsh/45-plugins.zsh contain these exact strings,
+# and that is the entire point. There is deliberately no audit section calling this. The
+# Core-side guard is the INVERSE assertion in scripts/test-core.sh, which fails if Core ever
+# stops carrying the blocks it makes the fleet drop: a gate that forces nine repos to delete
+# something Core has quietly lost is worse than no gate at all.
+#
+# ONE PATTERN IS DELIBERATELY OBFUSCATED: the WSL rule spells the kernel version file as
+# `/proc/versio[n]` — an ERE character class matching exactly one letter — so that the rule
+# TABLE does not match the rule it defines. This is the same self-reference problem the two
+# scanners above solve by assembling their patterns from fragments; only this one line needs
+# it, because only it contains a bare literal rather than a `[[:space:]]`-broken one. Write
+# it plainly and the helper reports itself. (It is `.sh`, and lint-call.yml scans `*.zsh`, so
+# nothing in production would ever have noticed — which is precisely why it is fixed here.)
+#
+# WHAT IT IS: a textual scan, so a heuristic backstop rather than a proof — the same caveat
+# the scanners above carry. It catches the shape people actually write, which is also the
+# shape all seven copies actually had, not one assembled through a variable.
+#
+# FALSE-POSITIVE DISCIPLINE, which is what keeps a gate switched on:
+#   * the patterns are exact GENERATOR INVOCATIONS, not tool names. `alias dv=direnv`,
+#     `direnv allow`, `gh pr create`, and an OS repo's own `_cache_eval brew brew shellenv`
+#     are all untouched — an OS-only tool's hook stays the OS layer's business, which is the
+#     whole point of the band.
+#   * comment lines are skipped, so a repo may write "direnv hook zsh is Core's now, see
+#     core/zsh/00-tools.zsh" in the very comment that replaces the deleted block.
+#   * the WSL rule keys on the kernel version file and on `_IS_WSL=`, NOT on
+#     $WSL_DISTRO_NAME. Reading the distro NAME (for a prompt, a title, a hostname) is a
+#     different use from re-implementing the DETECTION, and only the latter is Core's.
+# There is deliberately NO inline allow-marker escape hatch, for the reason §5e gives for
+# not having one: an escape hatch is an invitation to silence a real finding.
+#
+# TABLE-DRIVEN — adding a block Core takes over is ONE line in the heredoc. Fields are
+# whitespace-separated (`read -r rule re`), so the ERE must contain no LITERAL space; use
+# [[:space:]], as every pattern below does. Quoted heredoc, so `$` stays an ERE anchor and
+# nothing is expanded. bash 3.2-safe: no associative array, no mapfile (PORTABILITY.md §1).
+_core_owned_block_hits() { # _core_owned_block_hits <file>
+  local f="${1:-}" rule re
+  [ -f "$f" ] || return 0
+  while read -r rule re; do
+    [ -n "$rule" ] || continue
+    grep -nE "$re" "$f" 2>/dev/null |
+      awk -F: -v rule="$rule" '{ l = $0; sub(/^[0-9]+:/, "", l);
+                                 if (l !~ /^[[:space:]]*#/) print $1 ":" rule }'
+  done <<'EOF' | sort -t: -k1,1n -u
+direnv-hook (^|[^[:alnum:]_-])direnv[[:space:]]+hook[[:space:]]+zsh
+gh-completion (^|[^[:alnum:]_-])gh[[:space:]]+completion[[:space:]]+-s[[:space:]]+zsh
+uv-completion (^|[^[:alnum:]_-])uv[[:space:]]+generate-shell-completion[[:space:]]+zsh
+ty-completion (^|[^[:alnum:]_-])ty[[:space:]]+generate-shell-completion[[:space:]]+zsh
+wsl-detect /proc/versio[n]|(^|[^[:alnum:]_])_IS_WSL[[:space:]]*=
+EOF
+}
+
+# _core_owned_block_owner <rule-id> — the Core file that owns that block, for the
+# remediation line. A `case`, not a second table, so it cannot fall out of step silently:
+# an unknown id returns non-zero and the caller prints the generic pointer instead.
+_core_owned_block_owner() { # _core_owned_block_owner <rule-id>
+  case "$1" in
+  direnv-hook) echo "core/zsh/00-tools.zsh (band 00 — loads under every CORE_PROFILE)" ;;
+  gh-completion | uv-completion | ty-completion) echo "core/zsh/45-plugins.zsh (after compinit + carapace)" ;;
+  wsl-detect) echo "core/zsh/00-tools.zsh :: _core_is_wsl" ;;
+  *) return 1 ;;
+  esac
+}
+
 # ── _audit_ls: the file set the CONTENT gates inspect ─────────────────────────
 # Tracked files PLUS untracked-but-not-ignored ones. The distinction matters, and it
 # cost a real round-trip: a brand-new script is invisible to `git ls-files` until the
@@ -464,4 +543,34 @@ resolve_repo_dir() { # resolve_repo_dir <root> <repo-name> — echo the clone pa
     return 0
   done
   return 1
+}
+
+# ── byte-identical file comparison, without diffutils ──────────────────────────
+# `cmp -s A B` was the obvious way to ask "did that rewrite change anything", and it is
+# how sync-core.sh and update-nvim-plugins.sh both asked it. cmp ships in **diffutils**,
+# which is not guaranteed present: a Tumbleweed box in this fleet had none installed, so
+# neither `cmp` nor `diff` existed at all.
+#
+# A missing cmp does not fail usefully. `command not found` is a non-zero exit, and that
+# is indistinguishable from "the files differ" — so both callers silently took their
+# differ-branch for every file, in opposite directions:
+#   - sync-core.sh counted every candidate workflow as repointed, writing inflated counts
+#     into nine repos' commit messages while committing no workflow change at all (#572);
+#   - update-nvim-plugins.sh reported drift that did not exist, which under --check is
+#     exit 2 — the freshness gate going red on a lockfile that never moved.
+# One failing open and the other failing closed off the same missing binary is the tell
+# that the comparison, not either caller, was the wrong shape.
+#
+# git hash-object rather than a `command -v cmp` preflight: it removes the dependency
+# instead of detecting it. It is byte-exact (SHA-1 over the blob — no newline
+# normalisation, no text/binary heuristic), it needs no repository (verified: it hashes
+# fine with cwd outside any work tree), and git is the one tool every script here already
+# cannot run without. `sha256sum` was the other candidate and is wrong for this fleet:
+# macOS ships `shasum`, not `sha256sum`, and these scripts run on the MacBook too.
+#
+# A missing operand counts as "differs" so a caller that lost its temp file rewrites
+# rather than silently skipping — the safe direction for every caller here.
+core_files_identical() { # core_files_identical <a> <b> — 0 iff byte-identical
+  [[ -f "$1" && -f "$2" ]] || return 1
+  [[ "$(git hash-object -- "$1")" == "$(git hash-object -- "$2")" ]]
 }

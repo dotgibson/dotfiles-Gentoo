@@ -13,6 +13,323 @@ commit (`git tag -a vX.Y.Z -m vX.Y.Z`).
 
 ## [Unreleased]
 
+## [v4.15.1] - 2026-08-22
+
+### Fixed
+
+- **The fan-out no longer depends on a commit trailer that squash-merge destroys.** (#587)
+  `make sync` used `git subtree pull --squash`, which locates its base by grepping history
+  for the previous sync commit's `git-subtree-split:` trailer. Every fleet repo
+  squash-merges its fan-out PR, and a squash keeps the original body only if it happens to
+  be carried over — so the trailer died intermittently.
+
+  The damage was never a missing marker; it was a **wrong base**. Subtree silently fell
+  back to the newest _surviving_ trailer and replayed every change since onto a tree that
+  already contained them. Seven of nine repos lost the marker in the v4.14.3 round, and
+  the **v4.15.0 fan-out then failed in all nine at once**, conflicting on
+  `core/CHANGELOG.md` and `core/core.version` — the two files every release rewrites, so
+  the two guaranteed to overlap.
+
+  **Merging was the wrong operation to begin with.** `core/` is a pure vendored copy,
+  never edited downstream (`blib_install_core_guard` rejects it, `core-integrity.sh` proves
+  it byte-for-byte). "Make `core/` identical to Core@`core_sha`" has exactly one correct
+  answer and no merge base, so the sync now materializes the tree with `read-tree
+  --prefix` — the same plumbing `git subtree add` uses, so file modes come from the tree
+  object rather than being reconstructed. It cannot conflict, needs no trailer, and is
+  immune to whatever the merge policy does to commit bodies. It is also **self-healing**:
+  a `core/` that drifted for any reason is corrected by the next sync instead of
+  conflicting against its own drift.
+
+  Two consequences worth knowing. The sync is now **one atomic commit** per repo rather
+  than two — `core/`, `core.lock` and the workflow pins land together, closing the window
+  where `core/` had moved but `core.lock` had not (the state `core-integrity` reports as
+  TAMPERED). And the subtree trailer is still **emitted**, accurately, purely so consumer
+  tooling that reads it as a fallback keeps working; nothing depends on it any more, so a
+  squash eating it is now harmless rather than the thing that breaks the next release.
+
+  Pinned by a fixture that strips the trailer from every commit and then syncs to a newer
+  Core. It **fails** against the old `subtree pull` implementation and passes against this
+  one — the earlier draft of it did not, because a `subtree pull` round produced two
+  commits and amending `HEAD` rewrote the wrong one.
+
+## [v4.15.0] - 2026-08-22
+
+### Changed
+
+- **Core owns the ssh client config; seven OS repos stop each maintaining a copy.** (#450)
+  `blib_link_core` — Core's shared bootstrap library — read `$dotfiles/ssh/config`, the
+  **OS repo's root**: a hard dependency on a file Core neither shipped nor listed in
+  `core.manifest`, guarded by a `[[ -f ]]` that made "this repo forgot" and "this repo
+  opted out" the same silent outcome. Seven repos did provide one. Their `Host *` blocks
+  were **byte-identical** — connection multiplexing, keepalives, the KEX/cipher/MAC
+  allowlists, `StrictHostKeyChecking ask`, `ForwardAgent no`. The only functional
+  divergence in the entire fleet was one repo's per-service key names; everything else
+  that had drifted was comments. Nothing in the file is OS-, libc- or package-manager
+  specific, so by the "is it Core?" test it always belonged here.
+
+  It is now `core/ssh/config`, in the manifest, linked from `core/` like every other
+  file `blib_link_core` wires. Verified behaviour-neutral rather than assumed:
+  `ssh -G github.com` against the new file is **byte-identical** to the same query
+  against the config it replaces.
+
+  **Per-host variance gets a drop-in, not a fork.** The file `Include`s
+  `~/.ssh/config.d/*.conf` as its **first** directive, because ssh resolves each keyword
+  first-match-wins — placed at the bottom it would be silently inert. `blib_link_core`
+  creates that directory (0700), so a machine's per-service keys, work bastions or
+  1Password socket path live there, untracked, instead of forking the whole config.
+  A repo with a genuinely OS-specific need ships `ssh/os.conf`, which
+  `blib_link_os_layer` links to `~/.ssh/config.d/50-os.conf` — the same overlay shape as
+  `os/<os>.zsh` and `os/<os>.gitconfig`. One measured caveat is documented in the file:
+  `IdentityFile` **accumulates** rather than first-wins, so a drop-in's key is tried
+  first and Core's stays a fallback; `User` and `StrictHostKeyChecking` override outright.
+
+  **The `chmod 600` is gone, deliberately.** Core used to `chmod` the _source_ file —
+  reaching into the consumer repo's working tree to change a tracked file's mode, which
+  post-move would mean Core chmod'ing its own vendored tree in nine repos. It was never
+  needed: ssh refuses a config that is group- or world-**writable**, and git checks out
+  0644, which already satisfies that. The 0700 on `~/.ssh`, `~/.ssh/sockets` and
+  `~/.ssh/config.d` stays — ssh does require those. A test pins the absence so it cannot
+  creep back.
+
+  **For OS-repo maintainers:** delete your root `ssh/config` **only after** you have
+  vendored this Core (check `core.lock`) — reversed, the box has no ssh config at all.
+  `VENDORING.md` has the deletion order and the drop-in table.
+
+### Added
+
+- **The reusable lint gate finally lints markdown — all eight caller repos, no per-repo
+  workflow.** (#452) `lint-call.yml` had no markdown leg at all, so **no OS repo's markdown
+  was ever linted in CI**, even though every one of them ships a `.markdownlint.jsonc`.
+  Those configs were decoration; one says so in its own header. Core lints its own markdown
+  (`audit-core.sh` §7 plus a pre-commit hook), so this was a gap in the _reusable_ gate
+  specifically, not in Core's hygiene — and markdown is the file class `shellcheck` and
+  `zsh -n` never inspect, and the one a non-maintainer is most likely to read: each OS
+  repo's README is the public landing page for that layer.
+
+  Scoped like every other leg (`git ls-files '*.md' ':!:core/**'` plus the caller's own
+  `extra_ls_files_excludes`), and run from the caller's checkout so `markdownlint-cli2`
+  discovers **its** config rather than Core's — the two agree today, but the caller owns
+  its own rules. `markdownlint-cli2` is npm rather than a release asset, so it is installed
+  from the `MARKDOWNLINT_VERSION` pin exactly as `ci.yml` already does, instead of teaching
+  the SHA-256-verifying composite action a package manager it does not speak.
+
+  **ADVISORY this release, BLOCKING the next — measured, not guessed.** Run across the
+  fleet with each repo's own config and excludes before landing: Debian 0, Offense 0,
+  MacBook 1, Gentoo 16, Alpine 17, Fedora 18, openSUSE 20, Arch 26, Defense 52. Seven of
+  nine would have gone red the moment auto-tag moves `@v4`, before any maintainer could
+  act — callers pin a moving major tag. The backlog is smaller than 150 findings looks:
+  **130 are MD060** (table pipe alignment) and `markdownlint-cli2 --fix` clears most of it
+  (17 → 5 on the worst single file). Core's own 33 markdown files are already clean under
+  the same rules, so this is caller drift, not an unreasonable house style.
+
+  One deliberate difference from the shfmt leg it borrows its non-blocking shape from: a
+  **missing linter hard-fails**. The `if <tool>; then … else warn; fi` idiom cannot tell
+  exit 127 from exit 1, so a broken install would report as an ordinary advisory warning
+  and the leg would look like it had run for the whole release cycle. An advisory gate that
+  silently never runs is worse than no gate, because it reads as coverage.
+
+### Fixed
+
+- **`core.lock` records `core_ref`, a field that means what it is named.** (#453)
+  `sync-core.sh` wrote `core_branch=$CORE_BRANCH`, and `sync-fanout.yml` deliberately sets
+  `CORE_BRANCH="$target_sha"` so each release PR vendors the exact released commit rather
+  than a moving `main`. That pinning is correct and stays — the defect was persisting it
+  into a field named, and documented in `VENDORING.md`, as a _branch_. Every OS repo's lock
+  file therefore carried `core_branch` identical to `core_sha`: a file disagreeing with its
+  own contract, in the fleet's provenance record, with a field that added no information.
+
+  Named for what it holds, it earns its place. `core_sha` says _which commit_; `core_ref`
+  says _how it was chosen_ — a pinned commit for a release fan-out, a branch name for an
+  ad-hoc `make sync`. Each repo picks the new field up on its next sync. Two fixtures pin
+  it: the branch case, and the pinned-SHA case that was the actual bug — plus an assertion
+  that the old name is _gone_, since emitting both would satisfy the new check while
+  leaving the contradiction in every lock file.
+
+  **One consumer had to be fixed first, and this entry originally said there were none.**
+  The rename shipped on the claim that nothing read `core_branch` — which was verified
+  inside this repo only, where it is true (`fleet-drift.sh` and `core-integrity.sh` read
+  `core_sha`). `dotfiles-Offense` reads it, and is the only fleet member that does: it
+  vendors Core on its own schedule via `scripts/sync-core.sh` rather than waiting for the
+  fan-out. Unfixed, that script would have **died** on the renamed lock, and its
+  `check-core-freshness.sh` would have done something worse than dying — fallen back to
+  `main` and compared the vendored tree against main's tip while reporting success,
+  watching nothing, in the state that repo is in most of the time.
+
+  Fixed in dotgibson/dotfiles-Offense#233 **before** this release could reach it: both
+  now prefer `core_ref` and fall back to `core_branch`, so locks of either vintage work
+  and the rollout order cannot bite. Recorded here rather than quietly corrected, because
+  "nothing reads this field" is exactly the kind of claim a fleet-wide rename rests on,
+  and the check that produced it was scoped to one repo.
+
+- **The three zsh entry files a new OS repo is stamped with are now lintable.** (#451)
+  `scripts/new-os-repo.sh` emitted `zsh/zshenv`, `zsh/zprofile` and `zsh/zshrc`
+  **extensionless** — mirroring their symlink destinations (`~/.zshenv`,
+  `$ZDOTDIR/.zprofile`, `$ZDOTDIR/.zshrc`), which have no extension either. The reusable
+  lint gate selects repo-owned zsh with `git ls-files '*.zsh'`, so none of the three ever
+  matched, and none was syntax-checked in any repo, from the day the generator was added.
+
+  `~/.zshenv` is what makes that worth more than a rename: it is sourced on **every** zsh
+  invocation, non-interactive ones included, and it carries the ZDOTDIR indirection — so a
+  syntax error there does not degrade the shell, it breaks login shells outright on every
+  box running that layer. Simultaneously the highest-blast-radius file in an OS repo and
+  the only one the gate could not see.
+
+  The generator now writes `*.zsh` and links them to the same unchanged destinations, so
+  the fix is behaviour-neutral. **`lint-call.yml`'s two zsh legs additionally select the
+  three bare names by hand**, which covers the copies already written — `dotfiles-MacBook`
+  hand-wrote all three — without requiring a rename in each repo. Verified no repo goes
+  red on arrival: MacBook's three parse today, and the change takes it from 1 linted zsh
+  file to 4. A pathspec that matches nothing is inert, so it is a no-op elsewhere.
+
+  A new `test-core.sh` fixture pins all of it — the `.zsh` names, the absence of the bare
+  ones, agreement between the scaffolded filenames and the generated `bootstrap.sh` link
+  lines, and `zsh -n` over the result. Confirmed to fail when the defect is reintroduced.
+
+### Documentation
+
+- **`verify-core` is no longer named as a gate that runs, because it has never existed.**
+  (#454) The name was cited across the docs and code comments as the byte-for-byte
+  split-vs-upstream check backing several claims — `VENDORING.md`'s gate table listed it
+  against two of the three Core references, `core.manifest` credited it as the reason a
+  section needed no other backstop, and three comments in `sync-core.sh` plus one each in
+  `sync-fanout.yml` and `test-core.sh` described it running alongside `core-integrity`.
+  `ls scripts/verify-core.sh` has never found anything. Every surviving mention now says
+  so explicitly; `core-integrity.sh` — which resolves `core.lock`'s `core_sha` to a tree
+  and compares it with the vendored `core/` — is named where a real gate belongs. The
+  load-bearing half of this was already fixed: `nvim/`'s directory-granular manifest entry
+  cited the phantom as its orphan backstop, and `scripts/nvim-reachability.sh` (audit §4b)
+  is the real one.
+
+- **The docs' claim about per-repo `make core-lock` targets was false, and the truth
+  matters more after #453.** They said the target is "absent in most consumers, and where
+  it exists it only prints a redirect back to the fan-out". Four consumers have one, and
+  only `dotfiles-Offense`'s is a redirect: `dotfiles-Arch`, `dotfiles-MacBook` and
+  `dotfiles-openSUSE` each carry an **independent generator of a format Core owns** — and
+  they have already drifted from it and from each other. Arch hardcodes `core_branch=main`,
+  so regenerating a release-pinned lock silently discards which commit was vendored;
+  openSUSE writes the SHA into that field; MacBook reads the previous value back. None
+  knows about the `core_ref` rename, so running one now emits a lock the fleet's own docs
+  and tooling disagree with. `VENDORING.md` and `RELEASE-STRATEGY.md` now say this plainly
+  and name `sync-core.sh` as the only sanctioned writer. The three local generators are a
+  fleet-side fix, not a Core one — filed separately.
+
+- **`RELEASE-STRATEGY.md` listed six OS-native repos, not seven — `dotfiles-Debian` was
+  missing.** The bullet is about repos that carry no version of their own and are stamped
+  instead by the `core.lock` this repo generates for them. `dotfiles-Debian` vendors `core/`
+  and has a `core.lock` like the rest, so the document that defines the fan-out understated
+  it by one repo. `dotfiles-Windows` stays out of that list deliberately, and correctly: the
+  next bullet names it as the exception with no `core/` subtree, no `core.lock`, and a
+  `vX.Y.Z` of its own. Part of one drift with several faces — the same list had lost
+  `dotfiles-Debian` in six OS repos' READMEs, and `dotfiles-Debian`'s own README had lost
+  `dotfiles-Fedora` in its place. `CLAUDE.md` had it right throughout and is the copy the
+  rest were corrected against.
+
+## [v4.14.3] - 2026-08-21
+
+### Fixed
+
+- **`sync-core.sh`'s idempotence check failed open when `cmp` was missing, so a fan-out
+  reported repointing workflow pins it never touched.** (#572) `_sync_pin_workflows` asked
+  "did that rewrite change anything" with `cmp -s`. `cmp` ships in **diffutils**, which is
+  not guaranteed present — a Tumbleweed box in this fleet had none, so neither `cmp` nor
+  `diff` existed. A missing binary exits non-zero, which is indistinguishable from "the
+  files differ", so every candidate file took the changed-branch.
+
+  Observed on a real v4.14.x fan-out: seven of nine repos reported 6–12 workflow rewrites
+  and committed **zero**, and the false counts reached nine repos' commit subjects before
+  being corrected by hand. Contents were never corrupted — an unchanged file was rewritten
+  to identical bytes, so git recorded nothing — but a genuine rewrite failure and a missing
+  `cmp` were indistinguishable in the output.
+
+  The same call sat in `update-nvim-plugins.sh`, failing the other way: it reported drift
+  that did not exist, which under `--check` is exit 2 — the freshness gate going red on a
+  lockfile that never moved. One failing open and one failing closed off the same absent
+  binary is the tell that the comparison, not either caller, was the wrong shape.
+
+  Both now call `core_files_identical` in `scripts/lib/common.sh`, which hashes with
+  `git hash-object`. That removes the dependency rather than detecting it: byte-exact, no
+  repository required, and git is the one tool these scripts already cannot run without.
+  `sha256sum` was the other candidate and is wrong for this fleet — macOS ships `shasum`,
+  not `sha256sum`, and these scripts run on the MacBook too. `$(cat a) == $(cat b)` was
+  rejected for stripping trailing newlines from both sides, which would silently miss a
+  real one-byte difference; a test pins that case. Six assertions cover both directions, a
+  missing operand, the trailing-newline case, and correctness on a PATH carrying git and no
+  diffutils — plus a grep that fails the suite if any script reintroduces `cmp`.
+
+## [v4.14.2] - 2026-08-21
+
+### Fixed
+
+- **The `provision-stub` job shipped in v4.14.1 could not run.** It read its shim from the
+  CALLER's vendored `core/scripts/`, which is a different distribution channel from the
+  workflow that uses it: the workflow reaches a caller the moment the `v4` alias moves, while
+  `core/scripts/` only arrives when that repo merges its `core.lock` fan-out PR. Every repo in
+  that window got the job without the script and hard-failed with
+  `core/scripts/provision-shim.sh missing — vendored Core predates it`.
+
+  Harmless in practice — `provision_stub` defaults false and no repo had opted in — but the
+  first one to try (dotgibson/dotfiles-Debian#12) reded immediately.
+
+  The stubs are now built **inline in the job**, so there is exactly one artifact distributed
+  at exactly one ref. An intermediate attempt using a second Core checkout pinned at
+  `github.job_workflow_sha` was abandoned: it silently ran an _older_ revision of the script
+  than the run reported using, which is a worse failure than the one it replaced. Deletes
+  `scripts/provision-shim.sh` and `.github/actionlint.yaml` (whose only suppression existed
+  for `job_workflow_sha`).
+
+  Verified end-to-end before release this time, on `ubuntu:24.04` and `kalilinux/kali-rolling`
+  both: the full stubbed bootstrap walks apt, the 32-package base stack, fourteen SHA-pinned
+  installs, both vendor apt repos, carapace and unattended-upgrades, then crosses into
+  `wire_links` and finishes at `32 linked · 2 seeded · 0 backed up`.
+
+- **Footnote ³² said the OS layer wires direnv; v4.14.1 moved that into Core, in the same
+  release.** (#449) The `direnv` row's footnote was written days before #578 landed and
+  described the arrangement it replaced — "what makes it work is each OS repo's
+  `os/<distro>.zsh` at band 80". v4.14.1 ships both that sentence and the commit that made it
+  false, which is precisely the defect class #568 and #569 were filed for, reintroduced by the
+  footnote that was added alongside them.
+
+  Rewritten to what the code now does: Core wires direnv at `zsh/00-tools.zsh` band 00, and
+  the footnote records why that band rather than 45 (it registers a hook, not a compdef, and
+  band 00 loads under every `CORE_PROFILE` while 45 is ceilinged out of `minimal`) and why it
+  is sourced last of the four inits (direnv prepends to `precmd_functions`/`chpwd_functions`,
+  so sourcing after mise reproduces the resolution order an `.envrc` pinning tool versions
+  expects). The thesis changes with it: direnv is no longer "the one row Core neither installs
+  nor detects" — Core now **wires** it while still neither installing nor detecting it.
+
+  The Kali paragraph needed the same correction and for the same reason. It argued
+  `dotfiles-Offense` misses the hook because it has no `os/` layer — true at band 80, false at
+  band 00, where the hook reaches it from Core like everywhere else. It is live there now and
+  simply finds no binary, since that repo still installs none.
+
+## [v4.14.1] - 2026-08-21
+
+### Added
+
+- **CI can now run `provision()` for real, with the network stubbed.** (#575) `--links-only`
+  returns before `provision()` is entered, so package installation, retries, upstream
+  installers, repo/key setup and every failure path around them were executed by **no CI job
+  anywhere in the fleet**. That is how a leaked RETURN trap shipped green through review in
+  two repos: it aborted every fresh-box run _after_ installing everything and _before_
+  `wire_links`, and the one job that looks at `bootstrap.sh` never reached the function it
+  was in (`dotgibson/dotfiles-Debian#2`).
+
+  Adds `scripts/provision-shim.sh` — **a new file every OS repo receives in `core/scripts/`
+  on its next sync** — which builds a PATH shim of logging no-ops for the package managers,
+  downloaders and privilege tools a `provision()` reaches for, plus an **opt-in**
+  `provision-stub` job that runs the real bootstrap behind it. Most of that bug class is
+  control flow rather than I/O, so it executes without installing a package or touching the
+  network.
+
+  `sudo`/`doas` are not swallowed — they drop the escalation and re-exec the tail, so
+  `sudo apt-get install x` still reaches the apt-get stub and is still logged. `git` is
+  deliberately not stubbed, since bootstraps clone real things the caller pre-seeds and
+  stubbing it would mask wiring bugs this job should catch. The job asserts more than a zero
+  exit: the bug it exists for aborted _after_ `provision()` did its work, so it also checks
+  the symlink graph survived on the far side, and prints the intercepted command log.
+
+  Opt-in, so nothing changes for a repo that does not enable the job.
+
 ### Fixed
 
 - **`PORTING-MATRIX.md`: the Gentoo column told two lies, and a third that was bigger than
@@ -44,9 +361,152 @@ commit (`git tag -a vX.Y.Z -m vX.Y.Z`).
     again. `watchexec`'s Gentoo cell also moves `GURU²⁵` → `cargo²⁵`: GURU carries 2.5.0, but
     the bootstrap routes around it and builds `watchexec-cli` for upstream-latest.
 
+- **`direnv` is installed by six of the fleet's seven package lists and had no row in the
+  matrix at all.** (`dotgibson/dotfiles-openSUSE#89`) The `/os-package-availability` audit of
+  `dotfiles-openSUSE` reported it as its one coverage gap rather than drift: `direnv` appeared
+  in `PORTING-MATRIX.md` only inside footnote ¹², as one of the Gentoo GURU atoms. So a reader
+  asking "what is direnv called on Alpine" found nothing, and the next audit comparing a
+  package list against the table found a name the table did not know. It has a row now, and it
+  sits next to `mise` rather than in alphabetical order — this table has never been
+  alphabetical, and the two are the same mechanism: both are `_cache_eval`'d hook generators
+  emitted from `os/<distro>.zsh` at band 80, and Core's own `examples/mise.project.toml` calls
+  mise's `[env]` block "the direnv replacement" and its `[hooks]` block "the other half of
+  direnv".
+
+  Six of the seven cells are a bare `direnv`, verified 2026-08-21 against each distro's own
+  index: Arch `extra` 2.37.1-1, Alpine `community` 2.37.1-r7 (v3.24 — a Go binary, so a native
+  musl build), openSUSE Tumbleweed 2.37.1 with Leap 16.0 and 16.1 both at 2.34.0 through
+  Backports (`bp160.1.13` / `bp161.1.9`, both arches), kali-rolling 2.37.1-1, Ubuntu 24.04
+  `universe` 2.32.1-2ubuntu0.24.04.3 and Debian trixie 2.32.1-2+b16. Gentoo is the exception
+  and is GURU-only — `app-shells/direnv` at 2.37.1, no `::gentoo` atom, and `dev-util/direnv`
+  does not exist — so that cell reads `` `app-shells/direnv` ``¹², where the warning already
+  lived and which therefore needed no edit.
+
+  New footnote ³² records what makes the row unlike its neighbours, because no existing
+  footnote shape fits it. It is not ²¹'s "available, not installed" — six repos install it —
+  and not ¹⁷/¹⁹'s detect-only, because **Core does not detect it at all**: there is no
+  `HAVE_DIRENV`, no alias and no `core-doctor` row. It is the only row in the table wired by
+  the OS layer instead of by Core; the `direnv hook zsh` that makes it work is emitted by each
+  OS repo's `os/<distro>.zsh` at band 80. Core's one stake is `starship/starship.toml`'s
+  `[direnv]` module, which Core switches on (`disabled = false` — starship ships it off by
+  default) so `.envrc` state is visible rather than a directory silently waiting on
+  `direnv allow`. `dotfiles-Offense` (Kali) is the single fleet gap, and it is structural
+  rather than a judgment about direnv — that repo carries no `install/packages.txt` and, since
+  band 80 moved to the OS repo underneath it, no `os/` layer, so nothing there installs the
+  package or evaluates the hook.
+
+  One version floor is recorded because it is the only point where a frozen archive touches
+  Core: starship runs `direnv status --json`, and the `--json` flag is **silently ignored below
+  direnv 2.33.0** — `src/modules/direnv.rs` says so and parses the text output instead. Every
+  target above clears that floor except `dotfiles-Debian`'s two lanes, both on 2.32.1. It
+  degrades rather than breaks, which is why that repo's `install/packages.txt` declares no
+  `# min:` floor for it.
+
+- **Footnote ¹⁹ said both that Gentoo's `bootstrap.sh` emerges `gping` and that it does not.**
+  (#568) #565 rewrote the footnote's opening to record that `dotfiles-Gentoo` really does emerge
+  `net-analyzer/gping` from GURU in its `guru_install` pass — and that naming the atom only in a
+  `packages.txt` comment is a pointer to that call rather than a decline. Its closing sentence
+  was left behind still saying the opposite: "unlike the ¹² atoms `bootstrap.sh` does **not**
+  emerge it, so enable GURU per ¹² and `emerge net-analyzer/gping` by hand." A reader who got to
+  the end of the footnote was told to do by hand what the bootstrap had already done, and the
+  "unlike the ¹² atoms" framing inverted the actual relationship — the same rewrite had just
+  added `gping` to ¹²'s GURU list, so it is one of them.
+
+  The tail now agrees with the head: GURU-only, no main-tree atom, emerged **like** the ¹²
+  atoms in the same `guru_install` pass, nothing left to do by hand. Verified against
+  `dotfiles-Gentoo/bootstrap.sh`, where `net-analyzer/gping` is the last atom in that call.
+
+- **Footnote ²¹ claimed Kali installs `ast-grep`, and the `ast-grep` row's `³` rested on that
+  claim.** (#569) The note carved out an explicit exception — "Kali **does** install `ast-grep`
+  (`bootstrap.sh`, cargo best-effort), which is why that one cell keeps its ³ while its Gentoo
+  neighbour does not" — which is why the Kali column kept a `cargo³` there after `ouch`,
+  `jujutsu` and `lazygit` lost theirs in the same pass. There is no such install.
+  `dotfiles-Offense`'s `bootstrap.sh` contains no `ast-grep` at all, and its only two `cargo`
+  mentions are the comment and `export` that put `~/.cargo/bin` on PATH for tools an operator
+  added by hand — which is precisely the ²¹ contract, not a ³ one.
+
+  This mattered beyond the prose because ³ means "`bootstrap.sh` installs it best-effort", so a
+  ³ with no installer behind it reads as "you will get this" and delivers nothing — the exact
+  overclaim ²¹ was written to correct, surviving inside ²¹ itself for one tool. The `ast-grep`
+  Kali cell is now `cargo²¹`, matching `ouch` and `jujutsu` in that column, and the list of
+  cells that previously overclaimed a `³` gains `ast-grep` on Kali alongside Gentoo.
+
+- **`bootstrap-test` and `lint` disagreed about the same `bootstrap.sh`, and only one of
+  them applied the fleet's shellcheck exclusions.** (#517) `lint-call.yml` set
+  `SHELLCHECK_OPTS` with Core's curated `SC1090,SC1091,SC2015,SC2088` exclusions;
+  `bootstrap-test.yml` lints the same file and set nothing. So the four codes Core has
+  explicitly decided are not defects still blocked — just in the other gate, and the same
+  commit could be green in `lint` and red in `bootstrap`.
+
+  The failure mode is nastier than the disagreement itself, because the two gates run on
+  different triggers: `lint` on every push and PR, `bootstrap` only when `bootstrap.sh` or
+  `core/` changes. A repo stays green for weeks, then a bootstrap-touching PR reds with an
+  error naming a rule the fleet documented as excluded. The natural reading is "the
+  exclusion list is wrong" and the natural fix is to weaken the shell script to satisfy it —
+  which is what happened in `dotfiles-Gentoo` before anyone noticed the gates simply
+  disagreed.
+
+  The workaround had already spread by the time this was found: `dotfiles-Arch`, `-Debian`
+  and `-Fedora` each carry an independent copy of Core's exclusion list in their own
+  `.shellcheckrc`, none aware of the others, while `-Offense` and `-openSUSE` have a
+  `.shellcheckrc` without it and `-MacBook`, `-Alpine`, `-Defense` and `-Gentoo` have none
+  at all. Setting it in the workflow fixes all nine at once, including the six no per-repo
+  workaround ever reached.
+
+  **Nothing changes colour on merge** — all nine `bootstrap.sh` files pass both invocations
+  today, so this closes a latent trap rather than a live break. GitHub cannot import an env
+  value from one workflow into another, so the literal is necessarily authored twice;
+  `scripts/test-core.sh` now asserts the two copies are equal, the same shape as the
+  `os-repos.txt` fallback-array check and for the same reason. Deliberately **not** done:
+  adding a `disable=` line to Core's own `.shellcheckrc` — Core's tree is green without
+  those exclusions, and adding them would weaken its own gate to match a rule written for
+  consumers. The per-repo `.shellcheckrc` fragmentation is tracked separately in #564.
+
 ## [v4.14.0] - 2026-08-21
 
 ### Changed
+
+- **Seven OS repos stop hand-maintaining the same shell-hook block; Core owns it.** (#449)
+  `direnv hook zsh`, `gh completion -s zsh`, `uv generate-shell-completion zsh` and
+  `ty generate-shell-completion zsh` were duplicated across every `os/*.zsh` in the fleet —
+  portable zsh with nothing OS-specific in it, maintained once per repo, and already drifted
+  into **three variants of one block**: Alpine and Gentoo carried only two of the four tools,
+  and one copy suppressed the generator's stderr in its fallback arm where the others did
+  not. So whether your shell completed `uv` depended on which OS you booted. They now live
+  in Core, and Alpine, Gentoo and the Debian family gain `uv`/`ty` completions for free.
+
+  **Split by kind rather than kept together**, because the two halves have different
+  constraints. `direnv` goes to `zsh/00-tools.zsh` alongside the zoxide/mise/atuin inits: it
+  registers a hook, needs no `compinit`, and band 00 loads under **every** `CORE_PROFILE` —
+  filed under band 45 it would silently stop `.envrc` files loading on minimal hosts, which
+  is a broken feature rather than a missing convenience. `gh`/`uv`/`ty` go to
+  `zsh/45-plugins.zsh` immediately **after** the carapace block: they call `compdef`, so they
+  must follow `compinit`, and they must follow carapace so a tool's own completion keeps
+  overriding carapace's bridged one — the order they already ran in at band 80, so this
+  preserves behaviour rather than changing it. All four move, `ty` included: `_cache_eval`
+  bails on an absent binary, so a host without the tool pays nothing.
+
+  One ordering that is easy to lose and now has a test behind it: direnv **prepends** its
+  hook to `precmd_functions`/`chpwd_functions`, and so does mise — whichever is sourced last
+  runs first. The direnv line therefore sits _after_ the mise line, reproducing exactly the
+  order these hooks had while direnv was hooked from band 80.
+
+  **Measured startup cost, because one of these four is not free.** Sourcing the cached
+  inits in a compinit-ready shell, 100+ runs each (`hyperfine`): `direnv` (14 lines) and
+  `gh` (212) are together **+0.6 ms** over a 12.9 ms baseline — noise. `uv` ships a
+  **6,976-line** completion and `ty` 325, and the pair costs **+37 ms**. The five repos that
+  already hooked all four have been paying that all along and see no change; Alpine, Gentoo
+  and the Debian family newly pay it, but only on a host that actually has `uv` installed.
+  That is the price of the fleet agreeing on one answer, and it is worth knowing rather
+  than discovering. Sourcing 7k lines on every shell to serve one `<TAB>` is the wrong
+  shape long-term — the fix is an `fpath` autoload rather than a `source`, filed separately.
+  Note the bench job cannot see any of this: it runs a hermetic sandbox with none of these
+  binaries, so every call is a two-token no-op there.
+
+  **For OS-repo maintainers:** nothing to do until you vendor this. After the sync, delete
+  your local copy (`VENDORING.md` has the list). Running both is harmless in the meantime —
+  direnv's hook guards its own registration, a repeated `compdef` re-points the same binding,
+  and Core reuses the same cache files, so the transitional window behaves exactly as today.
 
 - **nvim plugin pins move forward for five plugins.** `nui.nvim`, `nvim-lint`,
   `nvim-lspconfig`, `package-info.nvim` and `schemastore.nvim` advance to the commits
@@ -67,6 +527,36 @@ commit (`git tag -a vX.Y.Z -m vX.Y.Z`).
   to be lost again. They belong here, once, and reach every machine by fan-out.
 
 ### Added
+
+- **`_core_is_wsl` — one WSL predicate for the whole fleet, and a gate against the copies
+  coming back.** (#449) Six OS repos carried a byte-identical `_IS_WSL=0; …` probe to gate
+  their Windows-interop niceties. Core had the same fact twice more and neither was reachable
+  from zsh: `blib_is_wsl` (bash, forks `grep`, no test seam) and a private copy inside
+  `bin/clip`. Eight implementations of one predicate, in two languages, drifting
+  independently. `zsh/00-tools.zsh` now exports `_core_is_wsl` as a second Core→OS API
+  alongside `_cache_eval` — fork-free (`$(<file)`, no `cat`, no `grep`, because unlike the
+  bootstrap sibling this runs on every interactive shell), **lazily memoised** into
+  `_CORE_IS_WSL` so a shell that never asks never pays, and carrying a `$CORE_PROC_VERSION`
+  test seam. The seam is not decoration: without it the "this box is not WSL" case cannot be
+  asserted on a WSL development host and "this box is WSL" cannot be asserted on a CI runner,
+  so half the predicate would go untested on every machine. `PORTABILITY.md` gains the shim
+  row and documents the narrow **env-fact exception** to its own `command -v` rule.
+
+- **A gate against portable logic stranded outside Core.** (#449) `audit-core.sh` §5c catches
+  OS-specifics leaking _into_ Core; nothing caught the reverse, which is why the block above
+  went unnoticed long enough to drift three ways — it could only be found by reading two
+  layers side by side. `scripts/lib/common.sh` gains `_core_owned_block_hits`, the single
+  definition of "this repo re-implements something Core owns", and
+  `.github/workflows/lint-call.yml` gains a leg that runs it over each caller's repo-owned
+  `*.zsh`. It flags exact generator invocations rather than tool names, so hooking a tool
+  that exists on one OS and nowhere else — the OS layer's actual job — is never a finding.
+
+  Unlike the `RETURN`-trap gate it has **no `audit-core.sh` counterpart**, on purpose: Core's
+  own tree contains every pattern it scans for, which is the point. The Core-side guard is
+  the _inverse_ assertion in `scripts/test-core.sh` — if Core ever loses a block, the gate
+  would be making nine repos delete a feature nobody provides. And it **warns in this release
+  and blocks in the next**, because unlike that gate it is red-on-arrival by construction: no
+  OS repo can delete its copy until it has vendored the Core that replaces it.
 
 - **A gate against leaked `RETURN` traps, for the fleet and for Core's own tree.**
   (#552, #555, #558; refs #512, #461) A bash `RETURN` trap is a **global slot, not a
@@ -197,7 +687,8 @@ commit (`git tag -a vX.Y.Z -m vX.Y.Z`).
   only for a box that opted in. Being packaged made the _instruction_ wrong, not the policy —
   wiring it into the per-repo bootstrap remains the tracked follow-up it already was.
 
-- **`PORTING-MATRIX.md`'s openSUSE story was written for Leap 15.6, which is EOL.** (#89)
+- **`PORTING-MATRIX.md`'s openSUSE story was written for Leap 15.6, which is EOL.**
+  (`dotgibson/dotfiles-openSUSE#89`)
   Four passages still described a release nobody runs; two of them gave advice that is now
   wrong rather than merely dated. All figures below were verified against the `repo/oss`
   binary indexes for Leap 16.0, Leap 16.1 and Tumbleweed on 2026-08-21 — both arches, since

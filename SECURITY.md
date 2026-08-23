@@ -13,8 +13,9 @@ issue, because both run with elevated privileges or touch machine trust:
   one of those to an attacker-controlled source, or escalate beyond the steps it
   declares, is a vulnerability — not a bug.
 - **a tracked file leaking a secret.** `.gitignore` keeps SSH keys, `.env*`, and
-  `*.pre-dotfiles.*` backups out of the tree, and `ssh/config` is the only file
-  under `ssh/` that is tracked. A committed key or token is a security report.
+  `*.pre-dotfiles.*` backups out of the tree, and `ssh/` is now ignored outright —
+  the ssh client config moved into Core, so this repo tracks nothing there at all.
+  A committed key or token is a security report.
 
 `core/` is a **vendored copy of [dotfiles-core]** and is not maintained here. A
 vulnerability in a `core/` file should be reported against that repo — it fans out

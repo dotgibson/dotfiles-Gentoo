@@ -49,6 +49,7 @@ _Repo status_ at the bottom).
 | starship         | `starship`        | `starship`¹⁸ | `starship`        | `app-shells/starship`      | script³           | asset²⁸       |
 | atuin²⁰          | `atuin`           | `atuin`¹⁸    | `atuin`           | `app-shells/atuin`         | `atuin`³          | asset²⁸       |
 | mise³⁰           | `mise`            | script³⁰     | script³⁰          | script³⁰                   | script³⁰          | asset²⁸       |
+| direnv³²         | `direnv`          | `direnv`     | `direnv`          | `app-shells/direnv`¹²      | `direnv`          | `direnv`      |
 | yazi             | `yazi`            | `yazi`¹⁸     | `yazi`            | `app-misc/yazi`¹²          | cargo³            | —²⁹           |
 | tree-sitter-cli⁵ | `tree-sitter-cli` | cargo³       | `tree-sitter-cli` | cargo³                     | `tree-sitter-cli` | asset²⁸       |
 | jq               | `jq`              | `jq`         | `jq`              | `app-misc/jq`              | `jq`              | `jq`          |
@@ -77,7 +78,7 @@ _Repo status_ at the bottom).
 | sesh⁹            | AUR⁹              | go⁹          | go⁹               | go⁹                        | go⁹               | go³           |
 | difftastic¹⁰     | `difftastic`      | `difftastic` | `difftastic`      | `dev-util/difftastic`      | `difftastic`      | asset²⁸       |
 | git-absorb²¹ ²⁶  | `git-absorb`      | `git-absorb` | `git-absorb`      | `dev-vcs/git-absorb`       | `git-absorb`      | `git-absorb`  |
-| ast-grep¹¹       | `ast-grep`        | `ast-grep`¹⁸ | `ast-grep`        | cargo²¹                    | cargo³            | —²⁹           |
+| ast-grep¹¹       | `ast-grep`        | `ast-grep`¹⁸ | `ast-grep`        | cargo²¹                    | cargo²¹           | —²⁹           |
 | uv³⁰             | `uv`              | `python-uv`  | `uv`              | `dev-python/uv`            | `uv`              | asset²⁸       |
 | w3m              | `w3m`             | `w3m`        | `w3m`             | `www-client/w3m`           | `w3m`             | `w3m`         |
 
@@ -284,9 +285,10 @@ covered), Homebrew (`gping`), nixpkgs, and Debian/Kali apt — where the **sourc
 rolling 1.20.4). openSUSE: **Leap 16.0 and 16.1** both carry it via Backports at 1.17.3
 (`gping-1.17.3-bp160.1.13` / `-bp161.1.6`, verified 2026-08-21) — behind, but present without
 adding a repo; **Tumbleweed** builds it from Factory (1.20.1). The old 15.6/1.16.1 reading
-here predated Leap 16 and 15.6 is now EOL. Gentoo is **GURU-only** (`net-analyzer/gping`) — there is
-no main-tree atom, and unlike the ¹² atoms `bootstrap.sh` does **not** emerge it, so enable
-GURU per ¹² and `emerge net-analyzer/gping` by hand. Inert without the binary; nothing depends on it.
+here predated Leap 16 and 15.6 is now EOL. Gentoo is **GURU-only** (`net-analyzer/gping`) — there
+is no main-tree atom, so it is emerged **like the ¹² atoms**, in the same `guru_install` pass and
+from the same overlay; nothing there is left for you to do by hand. Inert without the binary;
+nothing depends on it.
 
 ²⁰ atuin **daemon mode** — the one part of the atuin story that is NOT Core's to decide.
 Core ships `atuin/config.toml` (symlinked to `~/.config/atuin/config.toml`) with the
@@ -436,14 +438,19 @@ you:
   (Deliberately not a counted list — "all four" went stale the first time this family grew,
   "no Linux repo does" the second, and "`ouch` is the one entry" the third.)
 - The cells that previously showed **³** here — `ouch` on Gentoo **and** Kali, `jujutsu` on
-  Kali, `ast-grep` and `shfmt` on Gentoo, `lazygit` on Kali — promised a best-effort bootstrap
-  install that **does not exist**, verified against each repo's `bootstrap.sh` and
-  `install/packages.txt`. (Gentoo's `ouch`, `ast-grep` and `shfmt` have since _acquired_ such an
-  install, and `jujutsu` on Gentoo is now the packaged `dev-vcs/jj`⁸ — the correction stands for
-  Kali, and for what those cells claimed when it was made.) `lazygit` is the sharpest case: every other Linux repo installs it,
+  Kali, `ast-grep` on Gentoo **and** Kali, `shfmt` on Gentoo, `lazygit` on Kali — promised a
+  best-effort bootstrap install that **does not exist**, verified against each repo's
+  `bootstrap.sh` and `install/packages.txt`. (Gentoo's `ouch`, `ast-grep` and `shfmt` have since
+  _acquired_ such an install, and `jujutsu` on Gentoo is now the packaged `dev-vcs/jj`⁸ — the
+  correction stands for Kali, and for what those cells claimed when it was made.) `lazygit` is the sharpest case: every other Linux repo installs it,
   Kali installs it nowhere, and Core ships `alias lg='lazygit'` regardless.
-- Kali **does** install `ast-grep` (`bootstrap.sh`, cargo best-effort), which is why that one
-  cell keeps its ³ while its Gentoo neighbour does not.
+- **Kali installs nothing from this family**, `ast-grep` included. This note used to carve out
+  an exception saying it did — "`bootstrap.sh`, cargo best-effort" — and that is why the
+  `ast-grep` row kept a `³` in its Kali cell after its neighbours lost theirs. There is no such
+  install: `dotfiles-Offense`'s `bootstrap.sh` contains no `ast-grep`, and its only two `cargo`
+  mentions are the comment and `export` that put `~/.cargo/bin` on PATH for tools **an operator
+  added by hand** — which is the ²¹ contract, not a ³ one. The cell is now `cargo²¹`, matching
+  `ouch` and `jujutsu` in the same column.
 
 This is the same overclaim already corrected once for openSUSE (`ouch`/`ast-grep`): ³ means
 "bootstrap.sh installs it best-effort", so a ³ with no installer behind it reads as "you
@@ -821,6 +828,51 @@ right when it was filed and is now two majors stale — a good reason to re-read
 rather than trust a remembered path. Neither is go-installed by any `bootstrap.sh` today
 (the Debian/Kali cells use Charm's apt repo, see ¹⁵), so these two are for the reader
 installing by hand.
+
+³² direnv: per-directory environment loader — **Core wires it but neither installs nor
+detects it.** There is no `HAVE_DIRENV`, no alias and no `core-doctor` row: `_cache_eval`
+already bails on an absent binary, so the hook needs no flag to guard it. Since **v4.14.1**
+the `direnv hook zsh` that makes it work lives in Core, at `zsh/00-tools.zsh` **band 00**,
+where #449 pulled seven byte-drifted `os/*.zsh` copies up into one. Band 00 and not 45 with
+the gh/uv/ty completions, because this registers a hook rather than a compdef and band 00
+loads under every `CORE_PROFILE` while 45 is ceilinged out of `minimal`; filed under 45 it
+would silently stop `.envrc` files loading on minimal hosts. It is sourced **last** of the
+four inits on purpose: direnv prepends `_direnv_hook` to `precmd_functions` and
+`chpwd_functions`, so sourcing it after mise reproduces the order these hooks had at band 80
+— direnv's per-directory env resolves before mise's, which is what an `.envrc` that pins tool
+versions expects. An OS repo that still carries the old band-80 block is harmless but
+redundant, and drops out on its next Core sync.
+
+Core's other stake is `starship/starship.toml`'s **`[direnv]` module**, which Core switches on
+(`disabled = false`; starship ships this module **off** by default): it renders `.envrc` state
+on the `srf1` band so a directory waiting on `direnv allow` is visible rather than silently
+unloaded. The module only draws inside a direnv-controlled tree, so a box without the binary
+loses a segment, not the prompt.
+
+**Installed, not merely available** — the inverse of ²¹. Six of the seven package lists carry
+it outright (`dotfiles-Arch`, `-openSUSE`, `-Alpine`, `-Debian`, `-Fedora`, and the MacBook
+`Brewfile`), and `dotfiles-Gentoo` emerges `app-shells/direnv` in its `guru_install` pass per
+¹². **`dotfiles-Offense` (Kali) is the single gap, and it is structural rather than a call
+about direnv**: that repo carries no `install/packages.txt`, so nothing there installs the
+package. It does now get the **hook** — that arrives from Core at band 00 like everywhere
+else, which is a change from the band-80 arrangement, where Offense missed it too for having
+no `os/` layer at all. So the hook is live there and simply finds no binary. The Kali cell
+above is the apt name you would install by hand.
+
+Verified 2026-08-21 against each distro's own index: **Arch `extra`** 2.37.1-1, **Alpine
+`community`** 2.37.1-r7 (v3.24 — a Go binary, so a native musl build), **openSUSE** Tumbleweed
+2.37.1 with **Leap 16.0 and 16.1 both at 2.34.0** through Backports (`bp160.1.13` /
+`bp161.1.9`, both arches), **kali-rolling** 2.37.1-1, **Ubuntu 24.04 `universe`**
+2.32.1-2ubuntu0.24.04.3 and **Debian trixie** 2.32.1-2+b16. **Gentoo is GURU-only** — 2.37.1,
+`~amd64 ~x86`, no `::gentoo` atom and no `dev-util/direnv`; see ¹². Where unpackaged, the
+module path is `github.com/direnv/direnv/v2` — the `/v2` is not optional, the ³¹ trap again.
+
+One version line, because it is the only place a frozen archive touches Core: starship runs
+`direnv status --json`, and **the `--json` flag is silently ignored below direnv 2.33.0** —
+starship's own `src/modules/direnv.rs` says exactly that and falls back to parsing the text
+output. Every target above clears that floor except `dotfiles-Debian`'s two lanes, both on
+2.32.1. It degrades rather than breaks, which is why that repo's `install/packages.txt`
+declares no `# min:` floor for it.
 
 ## Clipboard packages to install (backends for Core's `clip`)
 
