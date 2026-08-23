@@ -11,10 +11,22 @@
 #
 # WHY THIS IS NOT OPTIONAL. On a stable profile, several tools in this stack have
 # NO stable-keyworded version in ::gentoo at all, so `emerge` refuses them outright
-# and `core doctor` reports a permanent ✗. Verified on 23.0/desktop:
+# and `core doctor` reports a permanent ✗. Verified on 23.0/desktop, re-checked
+# 2026-08-23:
 #
-#     app-shells/zoxide   5 ebuilds, 0 with a stable amd64 keyword
-#     sys-fs/duf          2 ebuilds, 0 with a stable amd64 keyword
+#     app-shells/zoxide     5 ebuilds, 0 with a stable amd64 keyword
+#     sys-fs/duf            2 ebuilds, 0 with a stable amd64 keyword
+#     dev-util/shellcheck   1 ebuild,  0 with a stable amd64 keyword
+#     dev-util/difftastic   2 ebuilds, 0 with a stable amd64 keyword
+#
+# THERE ARE NOW TWO KINDS OF LINE HERE, and the difference matters when you read a
+# line and ask whether it is still needed:
+#
+#   unreachable — no stable ebuild exists, so the atom cannot install at all. The
+#                 four above, plus dev-vcs/jj and every GURU atom.
+#   below-floor — the atom installs fine on stable, but the stable version is under
+#                 a minimum Core requires. Version-restricted (`>=atom-x.y.z`) so
+#                 that older versions keep tracking stable. One today: neovim.
 #
 # Everything in the GURU overlay is testing-keyworded by convention, which is the
 # other ten. Shipping this list commented out — as this file did — meant a fresh
@@ -33,6 +45,21 @@
 # No stable keyword exists for these; without the line they cannot install at all.
 app-shells/zoxide ~__ARCH__
 sys-fs/duf ~__ARCH__
+
+# ── ::gentoo stable, but BELOW a floor Core requires ──────────────────────────
+# NOT a reachability line: app-editors/neovim installs perfectly well on a stable
+# profile. It installs the WRONG THING. The stable head is 0.11.7 and Core's
+# nvim-treesitter is pinned to `main`, which hard-requires 0.12 — so without this
+# line a stable box emerges 0.11.7, reports success, and Core's nvim config does not
+# load. "Resolves" and "usable" are different questions; this file only ever
+# answered the first one until now.
+#
+# Version-restricted on purpose. A bare `app-editors/neovim ~__ARCH__` would work,
+# but it unmasks 0.11.x testing releases too, and it reads as an unreachable-atom
+# line — which check 4 would then report as dead weight ("has gone stable, drop
+# it") about the one line here that must NOT be dropped. The `>=` form states the
+# floor, and check 8 matches it against `# min:0.12.0` in install/packages.txt.
+>=app-editors/neovim-0.12.0 ~__ARCH__
 
 # ── ::gentoo dev/repo tooling, testing-only ───────────────────────────────────
 dev-util/shellcheck ~__ARCH__

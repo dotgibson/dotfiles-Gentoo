@@ -67,13 +67,15 @@ Gentoo notes:
     and zsh is built from source into ~/.local. It is selected automatically
     when there is no way to escalate, because the alternative — aborting — leaves
     an unusable box on an account that simply cannot install packages.
-  • Five tools are optional extras, skipped by --no-extras. Four are packaged
-    nowhere on Gentoo and are built with cargo (ouch, ast-grep, jnv, watchexec);
+  • Five tools are optional extras, skipped by --no-extras. Four are not in
+    ::gentoo and are built with cargo (ouch, ast-grep, jnv, watchexec) — GURU does
+    carry ouch and watchexec, and cargo is chosen over them for upstream-latest;
     jj is dev-vcs/jj from ::gentoo (~arch — see gentoo/package.accept_keywords)
     and is emerged like any other atom. Nothing in Core wires them by default
     (every one is HAVE_*-gated), so --no-extras is a faster first run — at the
     cost of a ✗ next to each in `core doctor`. The tools Core DOES wire
-    (tree-sitter, viddy, gron, sesh, shfmt) are always installed.
+    (tree-sitter, viddy, gron, sesh, shfmt) are always installed — tree-sitter as
+    an emerged atom now (so --getbinpkg can supply it), the rest via cargo/go.
   • A keyword/USE-masked atom is skipped, reported, and never fatal; the run
     ends with a list of everything that did not complete. --strict turns that
     list into a non-zero exit (use it in CI).
@@ -169,8 +171,10 @@ fi
 # cargo writes $CARGO_HOME/bin and go writes $GOBIN; neither is on a fresh box's
 # bash PATH (they reach PATH via the OS zsh layer — i.e. only inside a Core shell
 # that does not exist yet). Without this every `command -v <tool>` guard below
-# answers "missing" for a tool that IS installed, and each re-run recompiles
-# tree-sitter-cli and viddy from source: minutes of work, silently discarded.
+# answers "missing" for a tool that IS installed, and each re-run recompiles viddy
+# from source: minutes of work, silently discarded. (It used to recompile
+# tree-sitter-cli too, until ::gentoo packaged it and this script stopped building
+# it — one fewer source build the guard has to protect, not one fewer reason for it.)
 blib_user_bindirs_on_path
 
 # ── sanity: confirm we're on Gentoo ───────────────────────────────────────────
@@ -837,7 +841,7 @@ provision() {
     # that the atom you just added is being read the way you meant it.
     ((${#atoms[@]})) && printf '     %s\n' "${atoms[@]}"
     blib_say "would enable the GURU overlay and emerge its tools (best-effort)"
-    blib_say "would install mise / tree-sitter-cli / viddy where missing"
+    blib_say "would install mise / viddy where missing (tree-sitter-cli is an atom above)"
     blib_say "would go-install: gron, sesh, shfmt"
     if ((EXTRAS)); then
       # --dry-run promises the full plan, so name both paths: "emerged" vs "built
@@ -886,8 +890,13 @@ provision() {
       blib_note_fail "mise: installer failed — retry later: curl -fsSL https://mise.run | sh"
   fi
   # ── cargo builds Core actively WIRES (not optional) ──────────────────────────
-  # tree-sitter-cli backs nvim-treesitter; viddy backs the watch->viddy alias.
-  _dotfiles_cargo_install tree-sitter-cli tree-sitter
+  # viddy backs the watch->viddy alias. tree-sitter-cli was the other one here and
+  # is gone on purpose: ::gentoo carries dev-util/tree-sitter-cli 0.26.11 STABLE,
+  # which clears nvim-treesitter's 0.26.1 floor, so it is an atom in
+  # install/packages.txt and Portage owns the upgrade. NB an already-provisioned box
+  # keeps its ~/.cargo/bin/tree-sitter until you remove it — that binary is what
+  # _dotfiles_cargo_install's `command -v` guard was matching, and it shadows the
+  # emerged one on PATH.
   _dotfiles_cargo_install viddy viddy
   # NOTE: starship / atuin are emerged from packages.txt on Gentoo (they ARE in
   # the main tree), so unlike the other repos there's no curl installer here. yazi

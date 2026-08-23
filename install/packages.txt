@@ -1,10 +1,16 @@
 # dotfiles-Gentoo/install/packages.txt
 # Portage ATOMS (category/name) for the modern terminal stack. One per line.
-# mise (not in the tree) and tree-sitter-cli (cargo) are handled by bootstrap.sh.
+# mise (not in the tree) is handled by bootstrap.sh. tree-sitter-cli USED to be a
+# cargo build here; ::gentoo packages it now and it is an atom below.
 #
 # Heads-up: several modern Rust CLIs are ~amd64 (testing-keyworded) on a stable
-# profile, and two of them (app-shells/zoxide, sys-fs/duf) have NO stable ebuild at
-# all. bootstrap.sh installs gentoo/package.accept_keywords for exactly those, so
+# profile, and FOUR of them have NO stable ebuild at all: app-shells/zoxide,
+# sys-fs/duf, dev-util/shellcheck and dev-util/difftastic. (Checked 2026-08-23 —
+# this count is what the next reader uses to judge whether a new atom needs a
+# keyword line, so re-check it rather than trusting it.) A fifth atom is keyworded
+# for a different reason entirely: app-editors/neovim IS stable, just below the
+# version Core requires — see the `# min:` floors below.
+# bootstrap.sh installs gentoo/package.accept_keywords covering all five, so
 # this list emerges cleanly on stable; --no-portage-config opts out, and
 # gentoo/package.use.example stays a review-and-copy template (USE is your call).
 # Building from source is slow — enable the binhost (--getbinpkg, see README).
@@ -51,9 +57,14 @@ app-misc/yq-go          # yq — mikefarah's GO yq (NOT app-misc/yq, which is th
 #   shfmt is absent from BOTH ::gentoo and GURU (PORTING-MATRIX footnote 7): there
 #   is no dev-go/shfmt atom, and the third-party overlays that carry it call it
 #   dev-util/shfmt. So it takes the go path, like gron and sesh.
-# Built with cargo by bootstrap.sh (packaged nowhere on Gentoo):
-#   tree-sitter-cli  viddy               — always; Core wires both
-#   ouch  ast-grep  jnv  watchexec       — the opt-in set, skipped by --no-extras
+# Built with cargo by bootstrap.sh (not in ::gentoo):
+#   viddy                               — always; Core wires it
+#   ouch  ast-grep  jnv  watchexec      — the opt-in set, skipped by --no-extras
+#   NOT the same as "packaged nowhere": GURU carries app-arch/ouch (0.8.1) and
+#   app-misc/watchexec (2.5.0), and cargo is chosen OVER both of them, for
+#   upstream-latest — a deliberate route-around, not an availability gap
+#   (core/PORTING-MATRIX.md footnote 25 says so for watchexec). viddy, ast-grep
+#   and jnv are the ones genuinely absent from BOTH trees.
 #   The watchexec crate is `watchexec-cli` — note the -cli suffix; plain
 #   `watchexec` is the library and installs no binary at all
 #   (core/PORTING-MATRIX.md footnote 25 is canonical).
@@ -77,7 +88,19 @@ app-misc/yq-go          # yq — mikefarah's GO yq (NOT app-misc/yq, which is th
 #   above for why shfmt has no atom on either tree.
 
 # ── editor + git workflow ─────────────────────────────────────
-app-editors/neovim
+# `# min:X.Y.Z` is a CONTRACT, not prose: scripts/check-packages.sh check 8 reads
+# these floors and fails if the tree cannot satisfy one (the same convention
+# dotfiles-Debian uses for its frozen-apt floors).
+app-editors/neovim      # min:0.12.0 — nvim-treesitter (main) hard-requires 0.12, and
+                        #   the newest STABLE ebuild is 0.11.7. Resolving is not the
+                        #   same as usable: without the >= line in
+                        #   gentoo/package.accept_keywords a stable profile emerges
+                        #   0.11.7 and Core's nvim config will not load
+dev-util/tree-sitter-cli  # min:0.26.1 — binary: tree-sitter. Backs nvim-treesitter.
+                        #   ::gentoo has 0.26.11 STABLE on amd64, which clears the
+                        #   floor, so this needs no keyword line — and no cargo
+                        #   build either: bootstrap.sh used to compile the crate on
+                        #   every privileged run
 dev-vcs/git             # `git subtree` ships with git on Gentoo
 net-misc/openssh        # client + server (Gentoo ships one package)
 dev-vcs/git-absorb      # `git absorb` — auto-route staged hunks into earlier commits
@@ -103,11 +126,17 @@ x11-misc/xclip          # X11 fallback
 # ── language toolchain ────────────────────────────────────────
 # rust-bin = PREBUILT rust/cargo. Use this, NOT dev-lang/rust — compiling the
 # Rust toolchain from source is a multi-hour ordeal you don't need. Provides
-# the cargo that bootstrap.sh uses to build tree-sitter-cli.
+# the cargo that bootstrap.sh uses to build viddy, and the opt-in extras set.
 dev-lang/rust-bin
 
-# ── Neovim provider deps (fix :checkhealth) ───────────────────
-dev-python/pynvim       # the Python 3 provider module
+# ── Neovim Python provider (OFF in Core — kept in case you re-enable it) ──
+# This block used to be headed "fix :checkhealth", and that is no longer why it is
+# here: core/nvim/lua/gerrrt/config/providers.lua sets vim.g.loaded_python3_provider
+# = 0, deliberately, so that a fleet machine WITHOUT pynvim emits no warning either.
+# There is no warning left for pynvim to fix. It stays because re-enabling the
+# provider on a box should not also mean hunting the package, and pip is
+# independently useful.
+dev-python/pynvim       # the Python 3 provider module (provider disabled in Core)
 dev-python/pip
 
 # ── Portage helpers (quality of life) ─────────────────────────
@@ -123,7 +152,10 @@ app-eselect/eselect-repository  # provides `eselect repository`, WITHOUT which t
 net-misc/curl
 net-misc/wget
 app-misc/jq
-www-client/w3m          # terminal web browser (text-mode; renders tables + inline images)
+www-client/w3m          # terminal web browser (text-mode; renders tables + inline
+                        #   images). NB 0.5.6, stable on amd64, but the package is
+                        #   maintainer-needed as of 2026-08-23 — the same hedge as
+                        #   lnav above, since orphaning is what precedes a treeclean
 sys-apps/gawk
 # direnv is GURU-only on Gentoo (app-shells/direnv, NOT dev-util/direnv, which
 #   does not exist) → emerged in the guru_install block in bootstrap.sh.

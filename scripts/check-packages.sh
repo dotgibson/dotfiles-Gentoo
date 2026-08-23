@@ -42,6 +42,13 @@
 #                    on a stable profile — the same three checks as 1-3, applied to
 #                    a list that also lives in the script. These come from the MAIN
 #                    tree, not the overlay, so unlike 5-6 this one always runs.
+#   8. floors      — a `# min:X.Y.Z` in install/packages.txt is a CONTRACT: the tree
+#                    must be able to give you that version or newer. Reachable is
+#                    not the same as USABLE — app-editors/neovim resolves on stable
+#                    and installs 0.11.7, one minor under what Core's nvim config
+#                    needs, which checks 1-3 cannot see because the atom is stable.
+#                    Satisfied either by a stable ebuild at/above the floor, or by a
+#                    version-restricted keyword line (`>=atom-x.y.z ~arch`).
 #
 # Checks 5 and 6 need the GURU overlay. Point GURU_TREE at a checkout, or sync it
 # (eselect repository enable guru && emaint sync -r guru). Without it they SKIP —
@@ -81,7 +88,7 @@ for _arg in "$@"; do
       # list above silently truncates --help mid-sentence, and nothing tests it.
       # The end line is the `GURU_TREE=...` usage line — re-derive it after any
       # edit to the header rather than adjusting it by arithmetic.
-      sed -n '2,54p' "${BASH_SOURCE[0]}"
+      sed -n '2,61p' "${BASH_SOURCE[0]}"
       exit 0
       ;;
     *)
@@ -220,15 +227,52 @@ say "extras atoms: ${#extras_atoms[@]} (from the extras_install call in bootstra
 _require_atoms "${#extras_atoms[@]}" extras_install
 
 # ── the keyword list we ship (atom names only; __ARCH__ is rendered at install) ─
+# A line is EITHER a bare atom (`app-shells/zoxide ~arch` — the atom has no stable
+# ebuild and cannot install at all) or version-restricted (`>=app-editors/neovim-
+# 0.12.0 ~arch` — the atom installs fine on stable, but below a floor Core needs).
+# Both spellings are Portage-valid and they mean different things, so both are kept:
+#
+#   keyworded[]      bare atom, for the existence and coverage lookups (checks 3, 6)
+#   keyword_floor[]  atom -> the floor a `>=` line unmasks, for check 8. A bare line
+#                    records no floor, so it can never satisfy one.
+#
+# Without the operator strip, `>=app-editors/neovim-0.12.0` reaches check 6 as an
+# atom name, is not a directory in either tree, and gets reported as a line that
+# "unmasks nothing" — fatal, on a line that unmasks precisely what it says.
 keyworded=()
+declare -A keyword_floor=()
+declare -A keyword_versioned=()
 if [[ -r "$KEYWORDS" ]]; then
   while IFS= read -r line; do
     line="${line%%#*}"
     # shellcheck disable=SC2206  # deliberate word-split: "<atom> <keyword>"
     parts=($line)
-    [[ ${#parts[@]} -ge 1 && -n "${parts[0]:-}" ]] && keyworded+=("${parts[0]}")
+    [[ ${#parts[@]} -ge 1 && -n "${parts[0]:-}" ]] || continue
+    spec="${parts[0]}"
+    atom="$spec"
+    # Range operators Portage accepts on an accept_keywords line. `=` and `~` are
+    # exact/that-version-any-revision rather than floors, so they are stripped for
+    # the lookups but record no floor: only >= (and >) raise a minimum.
+    if [[ "$spec" =~ ^(\>=|\>|\<=|\<|=|~)(.+)$ ]]; then
+      op="${BASH_REMATCH[1]}"
+      atom="${BASH_REMATCH[2]}"
+      # Strip the trailing -<version>: a version starts at the last `-` followed by
+      # a digit, which is exactly Portage's own rule for splitting P into PN and PV.
+      ver="${atom##*-}"
+      if [[ "$atom" == *-* && "$ver" =~ ^[0-9] ]]; then
+        atom="${atom%-*}"
+        [[ "$op" == ">=" || "$op" == ">" ]] && keyword_floor["$atom"]="$ver"
+      fi
+      keyword_versioned["$atom"]=1
+    fi
+    keyworded+=("$atom")
   done <"$KEYWORDS"
 fi
+
+# Was THIS atom's keyword line version-restricted? Check 4 needs to know: a `>=`
+# line exists BECAUSE a stable version below the floor exists, so "it has gone
+# stable, the line is dead weight" is exactly backwards there.
+_is_versioned_keyword() { [[ -n "${keyword_versioned[$1]:-}" ]]; }
 
 _is_keyworded() {
   local a want="$1"
@@ -258,19 +302,78 @@ _is_keyworded() {
 # repo installs — so on a provisioned box it would confirm itself. Reading the
 # ebuilds answers the question that actually matters here: would a FRESH stable
 # box, with only what we ship, be able to install this?
+# The KEYWORDS grep itself, so that _has_stable and _ebuild_versions cannot drift
+# apart on the one expression the paragraph above is entirely about.
+_ebuild_is_stable() { # <ebuild-path>
+  grep -qE "^[[:space:]]*KEYWORDS=.*[\"' ]${ARCH}([\"' ]|$)" "$1"
+}
+
 _has_stable() {
   local dir="${2:-$TREE}/$1" f
   for f in "$dir"/*.ebuild; do
     [[ -e "$f" ]] || continue
-    grep -qE "^[[:space:]]*KEYWORDS=.*[\"' ]${ARCH}([\"' ]|$)" "$f" && return 0
+    _ebuild_is_stable "$f" && return 0
   done
   return 1
 }
+
+# _ebuild_versions <atom> [--stable] — every PV this atom has in the tree, one per
+# line. `9999` (and any other live ebuild) is excluded: it sorts above everything
+# and is not a version anyone gets by asking for the atom.
+#
+# The PN/PV split is Portage's own rule read backwards — the filename is
+# `<pn>-<pv>.ebuild` and pn is the atom's own name, so there is nothing to guess.
+_ebuild_versions() { # <atom> [--stable]
+  local atom="$1" pn="${1##*/}" only_stable="${2:-}" f v
+  for f in "$TREE/$atom"/*.ebuild; do
+    [[ -e "$f" ]] || continue
+    if [[ "$only_stable" == "--stable" ]]; then
+      _ebuild_is_stable "$f" || continue
+    fi
+    v="${f##*/}"
+    v="${v%.ebuild}"
+    v="${v#"$pn"-}"
+    [[ "$v" == 9999* ]] && continue
+    printf '%s\n' "$v"
+  done
+}
+
+# _ver_ge <a> <b> — is a >= b?
+#
+# HEURISTIC, and deliberately so, for the same reason _has_stable is: the
+# authoritative answer is Portage's own version algebra, which needs Portage. This
+# is `sort -V`, which agrees with it on plain dotted versions and on `-rN`
+# revisions — everything this repo's floors are written in. It does NOT understand
+# Gentoo's `_alpha/_beta/_rc/_p` suffixes, which sort as ordinary text; a floor
+# written with one would compare wrong. Don't write one, or teach this function
+# first. Floors are ours to choose, so this is a constraint, not a gap.
+_ver_ge() { # <a> <b>
+  [[ "$1" == "$2" ]] && return 0
+  [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n1)" == "$1" ]]
+}
+
+# ── the `# min:` floors declared in install/packages.txt ───────────────────────
+# Read in a SECOND pass: the atom loop above strips comments before anything can
+# see them, and the floor lives in the comment. Same contract spelling as
+# dotfiles-Debian's packages.txt, which is where this convention comes from.
+declare -A floors=()
+while IFS= read -r line; do
+  [[ "$line" == *#* ]] || continue
+  floor_atom="${line%%#*}"
+  floor_atom="${floor_atom//[[:space:]]/}"
+  [[ -n "$floor_atom" ]] || continue
+  floor_cmt=" ${line#*#}"
+  [[ "$floor_cmt" =~ [[:space:]]min:([^[:space:]]+) ]] || continue
+  floors["$floor_atom"]="${BASH_REMATCH[1]}"
+done <"$PKGS"
+unset floor_atom floor_cmt
+say "floors: ${#floors[@]} (\`# min:\` contracts in $(basename "$PKGS"))"
 
 rc=0
 missing=() unstable_uncovered=() stale=()
 guru_missing=() guru_uncovered=() guru_graduated=() dead_keys=()
 extras_missing=() extras_uncovered=()
+floor_unsat=() floor_uncovered=()
 
 for atom in ${atoms[@]+"${atoms[@]}"}; do
   # 1. shape
@@ -297,6 +400,11 @@ done
 # and is skipped rather than reported as stale.
 for atom in ${keyworded[@]+"${keyworded[@]}"}; do
   [[ -d "$TREE/$atom" ]] || continue
+  # A version-restricted line is about specific versions, not the atom as a whole.
+  # Its atom having SOME stable ebuild is the premise of the line, not evidence
+  # against it — reporting it here would tell you to delete the floor. Check 8 is
+  # what says whether that line is still needed.
+  _is_versioned_keyword "$atom" && continue
   _has_stable "$atom" && stale+=("$atom")
 done
 
@@ -364,6 +472,48 @@ for atom in ${extras_atoms[@]+"${extras_atoms[@]}"}; do
   fi
 done
 
+# 8. Version floors. The question checks 1-3 cannot ask: not "can this install?"
+# but "can this install a version Core can actually use?". app-editors/neovim is
+# the case that motivated it — stable, reachable, and 0.11.7, one minor under what
+# nvim-treesitter's `main` branch hard-requires. Every check above passed on it.
+if ((${#floors[@]})); then
+  while IFS= read -r atom; do
+    want="${floors[$atom]}"
+    # Not in the tree at all is check 2's finding, already fatal. Reporting it a
+    # second time as a floor failure would double-count one problem.
+    [[ -d "$TREE/$atom" ]] || continue
+
+    best="$(_ebuild_versions "$atom" | sort -V | tail -n1)"
+    if [[ -z "$best" ]] || ! _ver_ge "$best" "$want"; then
+      # No ebuild reaches the floor at ALL. No keyword line can fix this; the tree
+      # simply does not carry a usable version. This is the Debian-lane trap
+      # arriving on Gentoo, and it is why the floor is checked rather than trusted.
+      floor_unsat+=("$atom — needs >= $want, newest in ::gentoo is ${best:-none}")
+      rc=1
+      continue
+    fi
+
+    # Satisfied by stable? Then no keyword line is wanted, and one would be dead
+    # weight (check 4's job to say so).
+    best_stable="$(_ebuild_versions "$atom" --stable | sort -V | tail -n1)"
+    [[ -n "$best_stable" ]] && _ver_ge "$best_stable" "$want" && continue
+
+    # Otherwise the floor has to come from a version-restricted keyword line whose
+    # own floor is at least as high. A BARE keyword line does not count: it unmasks
+    # every testing version including ones below the floor, so it cannot promise
+    # what the floor asks for.
+    kf="${keyword_floor[$atom]:-}"
+    [[ -n "$kf" ]] && _ver_ge "$kf" "$want" && continue
+
+    if [[ -n "$kf" ]]; then
+      floor_uncovered+=("$atom — needs >= $want; newest STABLE is ${best_stable:-none}, and the keyword line only unmasks >= $kf")
+    else
+      floor_uncovered+=("$atom — needs >= $want; newest STABLE is ${best_stable:-none}, and $(basename "$KEYWORDS") has no \">=$atom-$want ~$ARCH\" line")
+    fi
+    rc=1
+  done < <(printf '%s\n' "${!floors[@]}" | sort)
+fi
+
 ((${#missing[@]} == 0)) || {
   err "not in ::gentoo (typo, wrong category, or overlay-only — overlay atoms do not belong in packages.txt):"
   printf '        %s\n' "${missing[@]}" >&2
@@ -379,6 +529,14 @@ done
 ((${#extras_uncovered[@]} == 0)) || {
   err "emerged by bootstrap.sh's opt-in extras block with no stable keyword for $ARCH and no line in gentoo/package.accept_keywords — a stable profile CANNOT install these:"
   printf '        %s\n' "${extras_uncovered[@]}" >&2
+}
+((${#floor_unsat[@]} == 0)) || {
+  err "declared a \`# min:\` floor that ::gentoo CANNOT satisfy at any keyword — the atom resolves, but every version in the tree is below what Core needs:"
+  printf '        %s\n' "${floor_unsat[@]}" >&2
+}
+((${#floor_uncovered[@]} == 0)) || {
+  err "declared a \`# min:\` floor that a stable profile does not reach — the emerge SUCCEEDS and installs a version below the floor, which no other check here can see:"
+  printf '        %s\n' "${floor_uncovered[@]}" >&2
 }
 ((${#stale[@]} == 0)) || {
   warn "these have gone stable — the accept_keywords line is now dead weight and can be dropped:"
@@ -403,9 +561,9 @@ done
 
 if ((rc == 0)); then
   if ((GURU_OK)); then
-    say "OK — every atom (packages.txt + the extras block + the GURU list) exists and is installable on a stable $ARCH profile"
+    say "OK — every atom (packages.txt + the extras block + the GURU list) exists, is installable on a stable $ARCH profile, and meets every declared \`# min:\` floor"
   else
-    say "OK — every packages.txt and extras-block atom exists and is installable on a stable $ARCH profile (GURU absent: the guru_install list was NOT checked)"
+    say "OK — every packages.txt and extras-block atom exists, is installable on a stable $ARCH profile, and meets every declared \`# min:\` floor (GURU absent: the guru_install list was NOT checked)"
   fi
 else
   err "packages.txt / accept_keywords need attention (see above)"
