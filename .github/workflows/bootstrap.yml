@@ -28,6 +28,13 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # For packages-check ONLY, and it is the reason that job is worth having. A package
+  # rename or drop upstream breaks this repo's list with NOBODY having edited the repo,
+  # so a gate that fires only on pull_request cannot see the failure it exists to catch —
+  # it would go red on the next unrelated PR, blaming a change that did not cause it.
+  # Gentoo is the most rolling target in the fleet, which makes this the most useful here.
+  schedule:
+    - cron: "17 6 * * 5" # Fridays 06:17 UTC — off the hour, to dodge the runner rush
 
 permissions:
   contents: read
@@ -45,3 +52,19 @@ jobs:
       # anywhere. A green run means provision() ran and RETURNED, and wire_links still
       # happened after it — not that provisioning works: nothing is really installed.
       provision_stub: true
+      # Resolve every atom in install/packages.txt against the canonical package index,
+      # downloading and emerging nothing. This is the blind spot provision_stub cannot
+      # cover: it stubs the package managers, so a WRONG ATOM is invisible to it.
+      #
+      # A repo script rather than a one-liner, because Gentoo cannot do this in-container.
+      # `gentoo/stage3:latest` ships NO PORTAGE TREE — verified in CI, where
+      # `portageq best_visible /` failed to resolve `app-shells/zsh`, a package that plainly
+      # exists. Acquiring a tree means `emerge-webrsync` (minutes, ~200k files), and `prep`
+      # above is SHARED with links-only and provision-stub, which finish in ~20s and gain
+      # nothing from it. The script asks packages.gentoo.org instead — no tree, no emerge,
+      # ~37s for the whole list — and handles curl-or-wget because with no tree the
+      # container cannot install a client either (wget is in Gentoo's system set; curl is
+      # not). See scripts/pkg-resolve.sh for the full rationale and its exit contract.
+      packages_check: ./scripts/pkg-resolve.sh
+      # packages_file is left at its default (install/packages.txt) — this repo's list needs
+      # no pre-filtering, unlike dotfiles-Debian's per-distro annotations.
