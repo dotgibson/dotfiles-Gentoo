@@ -75,11 +75,11 @@ live on the [documentation site][docs].
 
 The system is three layers, each building on the one below:
 
-| Layer | Lives in | Owns |
-| --- | --- | --- |
-| **Core** | [`dotfiles-core`](https://github.com/dotgibson/dotfiles-core) → vendored into every OS repo's `core/` | zsh, tmux, nvim, git, starship — identical everywhere |
-| **OS-native** | `dotfiles-{MacBook,Windows,Fedora,Arch,Debian,openSUSE,Alpine,Gentoo}` (this repo among them) | package manager, clipboard, paths |
-| **Role** | `dotfiles-Offense`, `dotfiles-Defense` | offensive / defensive tooling |
+| Layer         | Lives in                                                                                              | Owns                                                  |
+| ------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| **Core**      | [`dotfiles-core`](https://github.com/dotgibson/dotfiles-core) → vendored into every OS repo's `core/` | zsh, tmux, nvim, git, starship — identical everywhere |
+| **OS-native** | `dotfiles-{MacBook,Windows,Fedora,Arch,Debian,openSUSE,Alpine,Gentoo}` (this repo among them)         | package manager, clipboard, paths                     |
+| **Role**      | `dotfiles-Offense`, `dotfiles-Defense`                                                                | offensive / defensive tooling                         |
 
 ### Languages
 
@@ -118,17 +118,17 @@ submodule step. `bootstrap.sh` is idempotent: it emerges the package list
 layer into place. Anything best-effort that fails is collected and listed at the
 end of the run rather than scrolling past mid-`emerge`.
 
-| Flag | Effect |
-| --- | --- |
-| `--dry-run` | print the full plan — every package, symlink and rewrite — and change nothing |
-| `--no-sync` | skip the slow `emerge --sync` on re-runs |
-| `--links-only` | re-link configs without touching Portage (needs no privileges) |
-| `--strict` | exit non-zero if any best-effort step failed (use this in CI) |
-| `--no-portage-config` | leave `/etc/portage` alone (keyword/licence-masked atoms are then skipped) |
-| `--no-extras` | skip the five opt-in tools — `ouch`, `ast-grep`, `jnv`, `watchexec` (cargo builds) and `jj` (`dev-vcs/jj`, emerged) |
-| `--user` | install everything into `$HOME` — no `emerge`, no `/etc/portage`, no privileges |
-| `--only zsh,nvim` | wire ONLY these Core module groups |
-| `--skip tmux` | wire everything EXCEPT these groups |
+| Flag                  | Effect                                                                                                              |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `--dry-run`           | print the full plan — every package, symlink and rewrite — and change nothing                                       |
+| `--no-sync`           | skip the slow `emerge --sync` on re-runs                                                                            |
+| `--links-only`        | re-link configs without touching Portage (needs no privileges)                                                      |
+| `--strict`            | exit non-zero if any best-effort step failed (use this in CI)                                                       |
+| `--no-portage-config` | leave `/etc/portage` alone (keyword/licence-masked atoms are then skipped)                                          |
+| `--no-extras`         | skip the five opt-in tools — `ouch`, `ast-grep`, `jnv`, `watchexec` (cargo builds) and `jj` (`dev-vcs/jj`, emerged) |
+| `--user`              | install everything into `$HOME` — no `emerge`, no `/etc/portage`, no privileges                                     |
+| `--only zsh,nvim`     | wire ONLY these Core module groups                                                                                  |
+| `--skip tmux`         | wire everything EXCEPT these groups                                                                                 |
 
 Module groups are `zsh nvim tmux git prompt tools`; they affect wiring only, never
 package provisioning. Run `./bootstrap.sh --help` for the full usage. On a fresh
@@ -161,13 +161,13 @@ three, so nobody goes hunting for a permissions problem they do not have.
 
 What changes:
 
-| | privileged run | `--user` |
-| --- | --- | --- |
-| tool stack | `emerge` (39 atoms) + GURU | mise prebuilt binaries (`gentoo/mise-tools.toml`) |
-| gaps | cargo / `go install` | same — `procs`, `git-absorb`, `sesh` |
-| zsh | `app-shells/zsh` | built from source into `~/.local` (pinned + SHA-256 verified) |
-| login shell | `chsh` | a guarded `exec zsh -l` from `~/.bash_profile` — `chsh` cannot name a `$HOME` shell, since `/etc/shells` is root-only |
-| `/etc/portage` | keywords + licence installed | untouched |
+|                | privileged run               | `--user`                                                                                                              |
+| -------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| tool stack     | `emerge` (39 atoms) + GURU   | mise prebuilt binaries (`gentoo/mise-tools.toml`)                                                                     |
+| gaps           | cargo / `go install`         | same — `procs`, `git-absorb`, `sesh`                                                                                  |
+| zsh            | `app-shells/zsh`             | built from source into `~/.local` (pinned + SHA-256 verified)                                                         |
+| login shell    | `chsh`                       | a guarded `exec zsh -l` from `~/.bash_profile` — `chsh` cannot name a `$HOME` shell, since `/etc/shells` is root-only |
+| `/etc/portage` | keywords + licence installed | untouched                                                                                                             |
 
 It reaches the same place: **41/41 tools and all five integrations wired** in
 `core doctor`, measured on a stable-profile Gentoo box with no `sudo` at all.
@@ -253,12 +253,12 @@ those checks announce that they skipped rather than passing quietly.
 `main` is protected by a repository ruleset. Direct pushes are closed; everything
 lands through a PR, which must be up to date with `main` and green on:
 
-| Check | From | What it covers |
-| --- | --- | --- |
-| `guard / integrity` | `core-integrity.yml` | the vendored `core/` tree still matches the Core commit `core.lock` pins |
-| `lint / shell lint (shellcheck · shfmt · syntax)` | `lint.yml` | shellcheck + `bash -n` + `zsh -n` over every repo-owned shell file |
-| `lint / actionlint (workflow self-check)` | `lint.yml` | the workflows themselves |
-| `test / lint`, `test / links-only` | `bootstrap.yml` | `bootstrap.sh` wires a `gentoo/stage3` container end to end |
+| Check                                             | From                 | What it covers                                                           |
+| ------------------------------------------------- | -------------------- | ------------------------------------------------------------------------ |
+| `guard / integrity`                               | `core-integrity.yml` | the vendored `core/` tree still matches the Core commit `core.lock` pins |
+| `lint / shell lint (shellcheck · shfmt · syntax)` | `lint.yml`           | shellcheck + `bash -n` + `zsh -n` over every repo-owned shell file       |
+| `lint / actionlint (workflow self-check)`         | `lint.yml`           | the workflows themselves                                                 |
+| `test / lint`, `test / links-only`                | `bootstrap.yml`      | `bootstrap.sh` wires a `gentoo/stage3` container end to end              |
 
 `make lint` runs the same shell checks locally, with the same file selection and
 options, so you can be green before you push.
