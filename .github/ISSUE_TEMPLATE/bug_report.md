@@ -24,7 +24,7 @@ This repo owns: bootstrap.sh, install/packages.txt, os/gentoo.*, gentoo/*, wsl/.
 ## How to reproduce
 
 ```console
-$ ./bootstrap.sh --dry-run
+./bootstrap.sh --dry-run
 ```
 
 <!-- If an atom failed to emerge, the useful output is `emerge -p <category/name>`:
