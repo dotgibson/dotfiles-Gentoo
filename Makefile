@@ -64,6 +64,12 @@ doctor: ## Run core doctor in a Core shell (needs a completed bootstrap)
 	@command -v zsh >/dev/null || { echo "zsh not installed — run ./bootstrap.sh first"; exit 1; }
 	@zsh -ic 'core doctor' || true
 
-secrets: ## Scan the repo-owned tree for committed secrets
-	@command -v gitleaks >/dev/null || { echo "gitleaks not installed — see .gitleaks.toml for what this would run"; exit 1; }
-	@gitleaks detect --no-banner --redact --config .gitleaks.toml
+# --config core/gitleaks.toml is the ONE fleet policy — the same file Core's reusable
+# lint-call.yml passes for the blocking CI leg, so author time and CI measure the same thing.
+# This used to point at a repo-local .gitleaks.toml, which gitleaks ALSO auto-discovers: every
+# scan in this repo silently ran under a private rule set, and read as green because that set
+# allowlisted the finding rather than because Core's policy was applied
+# (dotgibson/dotfiles-core#624). See VENDORING.md, "The gates you run OVER the vendored tree".
+secrets: ## Scan the tree + history for committed secrets, under Core's policy
+	@command -v gitleaks >/dev/null || { echo "gitleaks not installed — this would run: gitleaks detect --config core/gitleaks.toml"; exit 1; }
+	@gitleaks detect --no-banner --redact --config core/gitleaks.toml
