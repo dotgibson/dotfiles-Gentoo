@@ -45,6 +45,26 @@ jobs:
     with:
       image: gentoo/stage3:latest
       prep: "grep -qE \"^ID='?gentoo\" /etc/os-release 2>/dev/null || echo \"ID='gentoo'\" >> /etc/os-release"
+      # THE WEEKLY UNSTUBBED SWEEP NEEDS HOURS ON THIS IMAGE, and only on this image.
+      # Read STATICALLY out of this block by dotfiles-core's scripts/fleet-bootstrap-matrix.py
+      # to set timeout-minutes on the real-bootstrap leg; the two jobs BELOW are stubbed,
+      # finish in ~20s, and deliberately keep their own tight ceilings. Do not wire this
+      # into them.
+      #
+      # 240, from measurement rather than a guess. On the first-ever real-bootstrap run
+      # (dotgibson/dotfiles-core#742) this leg was cancelled at the old flat 45m while still
+      # MAKING FORWARD PROGRESS — `emerge --sync` alone took the first 2.5 minutes, 112
+      # packages had completed, the binhost was active, and it was mid-emerge when killed,
+      # not stalled. bootstrap.sh says as much in its own header: "emerge COMPILES", "a
+      # single emerge can run for HOURS". The binhost covers many atoms but not all, and the
+      # ones that fall through (rust-bin, zoxide, atuin, starship, lnav, tree-sitter) compile
+      # locally for minutes each.
+      #
+      # GitHub's per-job ceiling is 360, so this keeps real headroom while still leaving a
+      # genuine hang something to hit — the point of check-modern.sh's rule 8. If a future
+      # run finishes far inside this, bring it down; if one is cancelled here, check the log
+      # for a STALL before raising it, because a cancelled leg is not a hang by itself.
+      bootstrap_timeout: 240
       # Run provision() for real, with package managers and downloaders replaced by
       # logging no-ops (dotgibson/dotfiles-core#575). --links-only returns BEFORE
       # provision() is entered, so package installation, retries, upstream installers,
