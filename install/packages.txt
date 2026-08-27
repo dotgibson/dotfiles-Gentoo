@@ -4,16 +4,30 @@
 # cargo build here; ::gentoo packages it now and it is an atom below.
 #
 # Heads-up: several modern Rust CLIs are ~amd64 (testing-keyworded) on a stable
-# profile, and FOUR of them have NO stable ebuild at all: app-shells/zoxide,
-# sys-fs/duf, dev-util/shellcheck and dev-util/difftastic. (Checked 2026-08-23 —
-# this count is what the next reader uses to judge whether a new atom needs a
-# keyword line, so re-check it rather than trusting it.) A fifth atom is keyworded
-# for a different reason entirely: app-editors/neovim IS stable, just below the
-# version Core requires — see the `# min:` floors below.
-# bootstrap.sh installs gentoo/package.accept_keywords covering all five, so
+# profile, and THREE of them have NO stable ebuild at all: app-shells/zoxide,
+# sys-fs/duf and dev-util/difftastic. (Checked 2026-08-26 — this count is what the
+# next reader uses to judge whether a new atom needs a keyword line, so re-check it
+# rather than trusting it. It was FOUR until dev-util/shellcheck was swapped for
+# dev-util/shellcheck-bin, which is stable — see that atom's note below.) A fourth
+# atom is keyworded for a different reason entirely: app-editors/neovim IS stable,
+# just below the version Core requires — see the `# min:` floors below.
+# bootstrap.sh installs gentoo/package.accept_keywords covering all four, so
 # this list emerges cleanly on stable; --no-portage-config opts out, and
 # gentoo/package.use.example stays a review-and-copy template (USE is your call).
 # Building from source is slow — enable the binhost (--getbinpkg, see README).
+#
+# TWO CONTRACTS LIVE IN THE COMMENTS ON THIS FILE, both read by scripts:
+#   `# min:X.Y.Z`  the tree must be able to give you that version or newer.
+#                  scripts/check-packages.sh check 8.
+#   `# bin:NAME`   the executable this atom is here to provide, asserted present
+#                  after a real bootstrap by scripts/assert-provisioned.sh.
+#                  DEFAULTS to the atom's own name, so it is written only where the
+#                  binary differs (ripgrep -> rg) or where the atom installs no
+#                  user-facing executable at all (`# bin:-`). Deriving that list
+#                  from THIS file rather than keeping a second copy in the script is
+#                  the whole lesson of app-misc/gum: a second copy of a list is a
+#                  second thing to forget, and it agreed with the first that gum was
+#                  fine for months.
 
 # ── shell + multiplexer ───────────────────────────────────────
 app-shells/zsh
@@ -22,19 +36,19 @@ app-misc/tmux
 # ── modern CLI core ───────────────────────────────────────────
 sys-apps/eza            # ls
 sys-apps/bat            # cat
-sys-apps/fd             # find (binary: fd)
-sys-apps/ripgrep        # grep
+sys-apps/fd             # bin:fd — find
+sys-apps/ripgrep        # bin:rg — grep
 app-shells/zoxide       # cd
 app-shells/fzf          # fuzzy finder
-dev-util/git-delta      # git pager / diffs (binary: delta)
+dev-util/git-delta      # bin:delta — git pager / diffs
 sys-process/btop        # top/htop
 app-shells/starship     # prompt (IN the main tree — emerge, no installer)
 app-shells/atuin        # shell history (IN the main tree)
-sys-block/dust          # du (binary: dust)
+sys-block/dust          # bin:dust — du
 sys-fs/duf              # df
 sys-process/procs       # ps
 net-dns/doggo           # dig / DNS client
-app-misc/yq-go          # yq — mikefarah's GO yq (NOT app-misc/yq, which is the
+app-misc/yq-go          # bin:yq — mikefarah's GO yq (NOT app-misc/yq, which is the
                         #   Python yq; core-doctor wants the Go one)
 
 # ── core-doctor extras that are NOT in the main tree ──────────────
@@ -59,15 +73,32 @@ app-misc/yq-go          # yq — mikefarah's GO yq (NOT app-misc/yq, which is th
 #   dev-util/shfmt. So it takes the go path, like gron and sesh.
 # Built with cargo by bootstrap.sh (not in ::gentoo):
 #   viddy                               — always; Core wires it
-#   ouch  ast-grep  jnv  watchexec      — the opt-in set, skipped by --no-extras
-#   NOT the same as "packaged nowhere": GURU carries app-arch/ouch (0.8.1) and
-#   app-misc/watchexec (2.5.0), and cargo is chosen OVER both of them, for
-#   upstream-latest — a deliberate route-around, not an availability gap
-#   (core/PORTING-MATRIX.md footnote 25 says so for watchexec). viddy, ast-grep
-#   and jnv are the ones genuinely absent from BOTH trees.
+#   ast-grep  jnv  watchexec           — the opt-in set, skipped by --no-extras
+#   NOT the same as "packaged nowhere": GURU carries app-misc/watchexec (2.5.0) and
+#   cargo is chosen OVER it, for upstream-latest — a deliberate route-around, not
+#   an availability gap (core/PORTING-MATRIX.md footnote 25 says so). viddy,
+#   ast-grep and jnv are the ones genuinely absent from BOTH trees.
 #   The watchexec crate is `watchexec-cli` — note the -cli suffix; plain
 #   `watchexec` is the library and installs no binary at all
 #   (core/PORTING-MATRIX.md footnote 25 is canonical).
+# Emerged from GURU by bootstrap.sh's opt-in extras block, NOT from this file:
+#   app-arch/ouch
+#   ouch USED to be a cargo build here under the same "upstream-latest" rationale
+#   watchexec still carries. It bought nothing and cost the build: `cargo install
+#   --locked ouch` FAILS on any GCC/libstdc++ box, because its default `unrar`
+#   feature pulls unrar-ng-sys, whose build.rs unconditionally adds
+#   -stdlib=libc++. gentoo/mise-tools.toml has documented that cause since user
+#   mode was written; the privileged path just never read its own note, and every
+#   sweep logged a bare "cargo build failed" (issue #133).
+#   GURU's app-arch/ouch is 0.8.1 — the SAME version as upstream's latest release,
+#   so the route-around bought zero version advantage — and its src_prepare() seds
+#   that exact flag out. So: Portage owns the upgrade, the binary lands in
+#   /usr/bin, a binhost can supply it, and it actually builds. Same reasoning that
+#   moved dev-vcs/jj off `cargo install jj-cli`, one tree over.
+#   It is opt-in, so it is NOT in the unconditional guru_install list and NOT in
+#   this file — bootstrap.sh has a `guru_extras_install` seam for the one pairing
+#   neither existing list covers (overlay-sourced AND skipped by --no-extras).
+#   scripts/check-packages.sh check 9 reads it from that call.
 # Emerged by bootstrap.sh's opt-in extras block, NOT from this file:
 #   dev-vcs/jj
 #   jj IS packaged. ::gentoo gained dev-vcs/jj on 2025-12-04 (EAPI 8, maintainer
@@ -91,27 +122,56 @@ app-misc/yq-go          # yq — mikefarah's GO yq (NOT app-misc/yq, which is th
 # `# min:X.Y.Z` is a CONTRACT, not prose: scripts/check-packages.sh check 8 reads
 # these floors and fails if the tree cannot satisfy one (the same convention
 # dotfiles-Debian uses for its frozen-apt floors).
-app-editors/neovim      # min:0.12.0 — nvim-treesitter (main) hard-requires 0.12, and
+app-editors/neovim      # bin:nvim min:0.12.0 — nvim-treesitter (main) hard-requires 0.12, and
                         #   the newest STABLE ebuild is 0.11.7. Resolving is not the
                         #   same as usable: without the >= line in
                         #   gentoo/package.accept_keywords a stable profile emerges
                         #   0.11.7 and Core's nvim config will not load
-dev-util/tree-sitter-cli  # min:0.26.1 — binary: tree-sitter. Backs nvim-treesitter.
+dev-util/tree-sitter-cli  # bin:tree-sitter min:0.26.1 — backs nvim-treesitter.
                         #   ::gentoo has 0.26.11 STABLE on amd64, which clears the
                         #   floor, so this needs no keyword line — and no cargo
                         #   build either: bootstrap.sh used to compile the crate on
                         #   every privileged run
 dev-vcs/git             # `git subtree` ships with git on Gentoo
-net-misc/openssh        # client + server (Gentoo ships one package)
+net-misc/openssh        # bin:ssh — client + server (Gentoo ships one package)
 dev-vcs/git-absorb      # `git absorb` — auto-route staged hunks into earlier commits
-dev-util/difftastic     # binary: difft — syntactic diff (core-doctor's `difft` row)
+dev-util/difftastic     # bin:difft — syntactic diff (core-doctor's `difft` row)
 
 # ── dev / repo tooling the doctor reports on ──────────────────
 # These are in ::gentoo and were simply never listed, so `core doctor` showed a
-# permanent ✗ for each on a fully-provisioned box. Three of the six are already
-# stable on amd64; shellcheck + difftastic take a keyword line (see
-# gentoo/package.accept_keywords).
-dev-util/shellcheck     # shell linter — also what this repo's own CI gate runs
+# permanent ✗ for each on a fully-provisioned box. All but difftastic are stable on
+# amd64; difftastic takes a keyword line (see gentoo/package.accept_keywords).
+dev-util/shellcheck-bin # bin:shellcheck — the linter this repo's own CI gate runs.
+                        #   THE `-bin` IS THE POINT, and do NOT "simplify" it back to
+                        #   dev-util/shellcheck. That atom is ~arch AND Haskell: it
+                        #   pulls >=dev-haskell/aeson-1.4.0 and the rest of the GHC
+                        #   chain, every one of them ~arch too, so a keyword line for
+                        #   shellcheck alone unmasks NOTHING. That is exactly how a
+                        #   green sweep shipped a box with no shellcheck, and how the
+                        #   printed hint sent the reader to a file that could not fix
+                        #   it (issue #133). dev-util/shellcheck-bin is upstream's own
+                        #   static build, KEYWORDS="-* amd64 ~arm arm64" — STABLE on
+                        #   amd64 and arm64, so it needs no keyword line at all — and
+                        #   it RDEPENDs !dev-util/shellcheck, so the two cannot coexist.
+                        #   NB the leading `-*`: on x86/ppc64/riscv this is reachable
+                        #   only via `**`, never `~arch`.
+                        #   Deliberately NO `# min:` floor. ::gentoo carries 0.11.0,
+                        #   the same version core/scripts/tool-versions.env pins — but
+                        #   that pin gates Core's CI, it is not a runtime floor Core's
+                        #   shell config needs. A floor here would red the packages
+                        #   gate every time ::gentoo lagged a koalaman release, for no
+                        #   gain. Do not add one.
+                        #   MIGRATION, and it is not hypothetical: the blocker is
+                        #   mutual, so a box that already merged dev-util/shellcheck —
+                        #   which the OLD hint's advice led people to do, at the cost
+                        #   of hand-keywording ~60 dev-haskell/* atoms and GHC — will
+                        #   see this emerge REFUSED until the source atom comes off:
+                        #     emerge --unmerge dev-util/shellcheck
+                        #   bootstrap.sh names that in the ledger now (its skip hint
+                        #   tells a blocker apart from a mask), and it deliberately
+                        #   does NOT unmerge for you: removing a package the operator
+                        #   installed is not a bootstrap's call. Same line this repo
+                        #   already holds on the stale ~/.cargo/bin/jj.
 app-benchmarks/hyperfine  # benchmark a command (the `count` corner next to viddy)
 app-admin/lnav          # log navigator. NB ::gentoo carries 0.11.2, three minors
                         #   behind upstream — the only version in the tree
@@ -120,14 +180,15 @@ dev-python/uv           # per-project Python envs + tool running; Core's mise co
                         #   uv owns .venv) and zsh aliases uvr/uvs against it
 
 # ── clipboard ─────────────────────────────────────────────────
-gui-apps/wl-clipboard   # wl-copy / wl-paste (Wayland)
+gui-apps/wl-clipboard   # bin:wl-copy — wl-copy / wl-paste (Wayland)
 x11-misc/xclip          # X11 fallback
 
 # ── language toolchain ────────────────────────────────────────
 # rust-bin = PREBUILT rust/cargo. Use this, NOT dev-lang/rust — compiling the
 # Rust toolchain from source is a multi-hour ordeal you don't need. Provides
 # the cargo that bootstrap.sh uses to build viddy, and the opt-in extras set.
-dev-lang/rust-bin
+dev-lang/rust-bin       # bin:cargo — the atom is `rust-bin`, the thing everything
+                        #   downstream actually needs on PATH is `cargo`
 
 # ── Neovim Python provider (OFF in Core — kept in case you re-enable it) ──
 # This block used to be headed "fix :checkhealth", and that is no longer why it is
@@ -136,13 +197,15 @@ dev-lang/rust-bin
 # There is no warning left for pynvim to fix. It stays because re-enabling the
 # provider on a box should not also mean hunting the package, and pip is
 # independently useful.
-dev-python/pynvim       # the Python 3 provider module (provider disabled in Core)
+dev-python/pynvim       # bin:- — an import, not an executable. The Python 3 provider
+                        #   module (the provider itself is disabled in Core)
 dev-python/pip
 
 # ── Portage helpers (quality of life) ─────────────────────────
-app-portage/gentoolkit  # equery (owns-file), euse, eclean, ...
+app-portage/gentoolkit  # bin:equery — equery (owns-file), euse, eclean, ...
 app-portage/eix         # fast package search/index (`eix <term>`)
-app-eselect/eselect-repository  # provides `eselect repository`, WITHOUT which the
+app-eselect/eselect-repository  # bin:- — it ships an eselect MODULE, not a binary of
+                        #   its own. Provides `eselect repository`, WITHOUT which the
                         #   GURU block in bootstrap.sh cannot enable the overlay —
                         #   and GURU carries ten of the core-doctor tools. A stage3
                         #   does not ship it, so this was an undeclared dependency

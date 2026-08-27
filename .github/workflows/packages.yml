@@ -99,3 +99,78 @@ jobs:
         run: ./scripts/check-packages.sh --require-tree
         env:
           GURU_TREE: /var/db/repos/guru
+
+      # THE BLIND SPOT check-packages.sh CANNOT COVER, and it is not a small one.
+      # That script asks, per atom, "does this have a stable keyword, or a line in
+      # gentoo/package.accept_keywords?" — a question about the atom ITSELF. It never
+      # asks whether the atom RESOLVES. dev-util/shellcheck passed every check in it
+      # for months while being flatly uninstallable, because its blocker was
+      # >=dev-haskell/aeson-1.4.0: a masked DEPENDENCY, one level down and invisible
+      # to a per-atom lookup. The bootstrap dutifully skipped it, printed a hint
+      # naming the wrong atom, and exited 0 (issue #133).
+      #
+      # Only Portage's own resolver can answer that, so ask it. `emerge -p` resolves
+      # the full graph and downloads nothing. It found a SECOND live instance of the
+      # same class on its very first run: every app-editors/neovim 0.12.x needs
+      # >=dev-lua/luv-1.52.1, which is ~arch on every arch, so the repo's neovim
+      # keyword line had never been enough on its own. Checks 3 and 8 both passed on
+      # it the whole time, because both are questions about neovim.
+      #
+      # RESOLVE AGAINST THE CONTAINER'S REAL ROOT — do NOT "improve" this by adding
+      # `--root` into an empty directory to simulate a fresh box. A conditional USE
+      # dependency (neovim's `${LUA_SINGLE_USEDEP}` on luv is the live example) cannot
+      # be satisfied against an empty vdb, and Portage reports the resulting dead end
+      # as a KEYWORD MASK on a package that is not masked at all. That false positive
+      # cost an investigation once already; the container is a fresh box, so simulating
+      # one inside it buys nothing.
+      #
+      # RENDER THE SHIPPED KEYWORD FILES FIRST. Resolving without them answers a
+      # different question than the one a fresh box asks — it would report every
+      # ~arch atom as broken, and it would not exercise the file whose whole job is
+      # to make them installable.
+      #
+      # ADVISORY (::warning::) FOR NOW, ON PURPOSE. A stage3 container's profile and
+      # USE defaults are not identical to a provisioned box's, so a first red here is
+      # as likely to be a fixture artefact as a real regression. PROMOTE THIS TO
+      # FATAL once it has run clean for a cycle: change the `else` branch's
+      # `::warning::` to `::error::` and add `exit 1` after the log tail. Leaving it
+      # advisory forever would make it the kind of gate this repo's own workflows
+      # keep warning about — one that reads as coverage while asserting nothing.
+      - name: Resolve the whole set with Portage (advisory)
+        shell: bash
+        run: |
+          # -e is on: a failed sed or a missing portageq is a broken FIXTURE and must
+          # not read as "resolved fine". Only the resolve itself is tolerant, and it
+          # is tolerant by sitting in an `if` condition, which errexit exempts.
+          set -euo pipefail
+          arch="$(portageq envvar ARCH)"
+          mkdir -p /etc/portage/package.accept_keywords /etc/portage/package.license /etc/portage/repos.conf
+          sed "s/__ARCH__/$arch/g" gentoo/package.accept_keywords \
+            >/etc/portage/package.accept_keywords/90-dotfiles-Gentoo
+          sed "s/__ARCH__/$arch/g" gentoo/package.license \
+            >/etc/portage/package.license/90-dotfiles-Gentoo
+          # The GURU tarball is on disk but unknown to Portage without this; without
+          # it app-arch/ouch would resolve as "no ebuilds", which is a fixture bug
+          # reported as a packaging bug.
+          printf '[guru]\nlocation = /var/db/repos/guru\n' >/etc/portage/repos.conf/guru.conf
+
+          # packages.txt plus BOTH opt-in lists, read from bootstrap.sh's own calls
+          # rather than retyped — the same rule check-packages.sh follows, for the
+          # same reason. The unconditional guru_install set is deliberately excluded:
+          # it is best-effort by design and a masked GURU atom there is not a defect.
+          # `sed 's/[[:space:]]//g'`, NOT `tr -d '[:space:]'` — tr has no concept of
+          # lines and eats the newlines too, collapsing the whole file into one
+          # 40-atom-long string that Portage rejects as a single invalid atom.
+          mapfile -t atoms < <(sed 's/#.*//; s/[[:space:]]//g' install/packages.txt | grep .)
+          mapfile -t -O "${#atoms[@]}" atoms < <(
+            grep -oE '^[[:space:]]*(guru_)?extras_install[[:space:]]+[a-z0-9-]+/[a-zA-Z0-9._-]+' bootstrap.sh \
+              | awk '{print $2}'
+          )
+          echo "resolving ${#atoms[@]} atoms"
+
+          if out="$(emerge -p --quiet "${atoms[@]}" 2>&1)"; then
+            echo "every atom resolves on a stable $arch profile with the keyword files this repo ships"
+          else
+            echo "::warning::Portage could not resolve the atom set — a MASKED DEPENDENCY is the usual cause, and no per-atom check in check-packages.sh can see one. Read which atom the 'have been masked' line quotes; it is often not the one you asked for."
+            printf '%s\n' "$out" | tail -n 60
+          fi

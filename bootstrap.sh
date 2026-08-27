@@ -67,18 +67,34 @@ Gentoo notes:
     and zsh is built from source into ~/.local. It is selected automatically
     when there is no way to escalate, because the alternative — aborting — leaves
     an unusable box on an account that simply cannot install packages.
-  • Five tools are optional extras, skipped by --no-extras. Four are not in
-    ::gentoo and are built with cargo (ouch, ast-grep, jnv, watchexec) — GURU does
-    carry ouch and watchexec, and cargo is chosen over them for upstream-latest;
-    jj is dev-vcs/jj from ::gentoo (~arch — see gentoo/package.accept_keywords)
-    and is emerged like any other atom. Nothing in Core wires them by default
+  • Five tools are optional extras, skipped by --no-extras, and they arrive by
+    three different routes. THREE are in neither tree and are built with cargo
+    (ast-grep, jnv, watchexec) — GURU does carry watchexec, and cargo is chosen
+    over it for upstream-latest. ouch is app-arch/ouch from GURU: its cargo build
+    cannot succeed on a libstdc++ box, so upstream-latest was never on offer there
+    (see guru_extras_install). jj is dev-vcs/jj from ::gentoo (~arch — see
+    gentoo/package.accept_keywords). Nothing in Core wires them by default
     (every one is HAVE_*-gated), so --no-extras is a faster first run — at the
     cost of a ✗ next to each in `core doctor`. The tools Core DOES wire
     (tree-sitter, viddy, gron, sesh, shfmt) are always installed — tree-sitter as
     an emerged atom now (so --getbinpkg can supply it), the rest via cargo/go.
   • A keyword/USE-masked atom is skipped, reported, and never fatal; the run
     ends with a list of everything that did not complete. --strict turns that
-    list into a non-zero exit (use it in CI).
+    list into a non-zero exit.
+
+--strict IS OFF BY DEFAULT, AND THAT IS A DECISION, not an oversight (issue #133).
+The end-of-run ledger mixes two unlike things: a genuine provisioning gap (an atom
+that will never install here) and an infrastructure blip (a rate-limited mise.run, a
+GURU sync hiccup, a failed tpm clone). --strict cannot tell them apart, so making it
+the default — or wiring it into the weekly unstubbed sweep — reds a run for somebody
+else's outage, and a gate that is red for reasons you cannot fix is one everybody
+learns to ignore. dotfiles-Fedora's bootstrap-full.yml made the same call, in those
+words, for the same reason.
+What the sweep needs is not a stricter exit but a FAR-SIDE ASSERTION, and this repo
+now ships one: scripts/assert-provisioned.sh asserts that every atom in
+install/packages.txt actually put its binary on PATH (hard-fail) and reports the
+best-effort tools separately (warn). Run that after a bootstrap. Use --strict when
+you want the run itself to carry the exit code.
 USAGE
 }
 
@@ -288,15 +304,108 @@ fi
 # blib_priv — a diagnostic probe must never prompt for a password. It runs only
 # on the failure path, once per already-failed atom, so its dependency
 # resolution is not on the hot path. If emerge is absent or itself fails, the
-# grep simply misses and we fall through to the masked/keyworded branch: that is
+# match simply misses and we fall through to the masked/keyworded branch: that is
 # the commoner cause and its advice is harmless when wrong.
+#
+# THERE ARE NOW FOUR OUTCOMES, NOT TWO, and the third is the one that shipped a
+# wrong instruction for months (issue #133). `emerge -p dev-util/shellcheck` does
+# not complain about shellcheck at all:
+#
+#   !!! All ebuilds that could satisfy ">=dev-haskell/aeson-1.4.0:=[profile?]"
+#   !!! have been masked.
+#
+# The blocker is a DEPENDENCY, one level down. The old hint printed the requested
+# atom's name either way and sent you to gentoo/package.accept_keywords to add a
+# line that unmasks nothing — into the very file you would then believe you had
+# checked. That is the app-misc/gum trap arriving from the other direction, and it
+# is worse than no hint, so this reads which atom the "have been masked" line
+# actually quotes and says that instead.
+
+# _atom_of <depspec> — the cat/pn of a Portage dependency spec. Strips a leading
+# block (`!`) and range operator, then `[use]`, then `:slot`, then the -rN revision,
+# then the trailing -<version> by Portage's own PN/PV rule (a version starts at the
+# last `-` followed by a digit) — the same split scripts/check-packages.sh implements
+# on the accept_keywords side. Keep the two spellings in step.
+#
+# THE REVISION HAS TO COME OFF FIRST, and leaving it on is not a cosmetic error. In
+# `dev-haskell/aeson-2.2.3.0-r2` the last `-` is followed by `r`, not a digit, so the
+# PN/PV rule declines to split and the whole PVR survives as the "atom" — which then
+# compares unequal to the atom we asked about and mislabels a self-mask as a
+# dependency mask. Portage's own PVR is PV plus an optional -rN; strip in that order.
+#
+# `${spec#'~'}` is quoted deliberately. Unquoted, bash TILDE-EXPANDS the pattern in
+# `${spec#~}` — it tries to strip $HOME from the front of a Portage atom and leaves
+# the `~` exactly where it was, which is how `~app-shells/zoxide-0.9.8` came out of
+# here still carrying its operator.
+_atom_of() {
+  local spec="$1"
+  spec="${spec#'!'}"
+  spec="${spec#'!'}"
+  spec="${spec#'>'}"
+  spec="${spec#'<'}"
+  spec="${spec#'='}"
+  spec="${spec#'~'}"
+  spec="${spec%%[*}"
+  spec="${spec%%:*}"
+  local rev="${spec##*-}"
+  if [[ "$spec" == *-* && "$rev" =~ ^r[0-9]+$ ]]; then spec="${spec%-*}"; fi
+  local ver="${spec##*-}"
+  if [[ "$spec" == *-* && "$ver" =~ ^[0-9] ]]; then spec="${spec%-*}"; fi
+  printf '%s' "$spec"
+}
+
 _emerge_skip_hint() {
-  local a="$1"
-  if emerge -p "$a" 2>&1 | grep -q 'there are no ebuilds to satisfy'; then
+  local a="$1" out masked reason blocker
+  # `|| true`: a refused emerge exits non-zero, which is precisely the case we are
+  # here to explain. Unguarded, the substitution would abort the run under `set -e`.
+  out="$(emerge -p "$a" 2>&1 || true)"
+
+  if printf '%s\n' "$out" | grep -q 'there are no ebuilds to satisfy'; then
     printf 'no such ebuild in any enabled repo — typo, wrong category, or an overlay that is not enabled'
-  else
-    printf "masked or keyworded — run 'emerge -p %s' for the exact keyword or licence, then add it to gentoo/package.accept_keywords" "$a"
+    return 0
   fi
+
+  # A BLOCKER is not a mask, and the difference is the whole fix. Portage says:
+  #
+  #   [blocks B     ] dev-util/shellcheck ("dev-util/shellcheck" is soft blocking
+  #                   dev-util/shellcheck-bin-0.11.0)
+  #
+  # Nothing here is masked and no keyword file can help — an ALREADY-INSTALLED
+  # package has to come off first. This is a live migration, not a hypothetical:
+  # dev-util/shellcheck-bin RDEPENDs !dev-util/shellcheck, so any box that got the
+  # source atom in before this change (by hand-unmasking the whole GHC chain, which
+  # the old hint invited) hits exactly this on its next bootstrap.
+  #
+  # The advice stops at naming the unmerge. Removing a package the operator
+  # installed is not this script's call — the same line it already holds for the
+  # stale ~/.cargo/bin/jj a few hundred lines down.
+  blocker="$(printf '%s\n' "$out" |
+    sed -n 's/.*("\([^"]*\)" is \(soft \)\?blocking .*/\1/p' | head -n1)"
+  if [[ -n "$blocker" ]]; then
+    printf 'BLOCKED by an already-installed package, not masked — no keyword file can fix this. Remove the conflicting package first: emerge --unmerge %s' "$blocker"
+    return 0
+  fi
+
+  # The quoted spec out of `All ebuilds that could satisfy "<spec>" have been masked`.
+  masked="$(printf '%s\n' "$out" |
+    sed -n 's/.*All ebuilds that could satisfy "\([^"]*\)".*/\1/p' | head -n1)"
+  # The parenthesised cause from the first `- <pkg> (masked by: ...)` line — the
+  # actionable half, because it separates a keyword mask from a package.mask from a
+  # licence, and those three want three different fixes.
+  # Greedy on BOTH sides so a nested paren survives: Portage really does write
+  # `(masked by: 1password EULA license(s))`, and a non-greedy [^)]* cuts it to
+  # "license(s" — a hint that looks like the output is corrupted.
+  reason="$(printf '%s\n' "$out" |
+    sed -n 's/.*(masked by: \(.*\))/\1/p' | head -n1)"
+
+  if [[ -n "$masked" ]] && [[ "$(_atom_of "$masked")" != "$(_atom_of "$a")" ]]; then
+    printf 'blocked by a masked DEPENDENCY, not by its own keyword: %s%s. Adding %s to gentoo/package.accept_keywords will NOT help — decide whether that dependency is worth unmasking, or whether another atom ships the same tool' \
+      "$masked" "${reason:+ (masked by: $reason)}" "$a"
+    return 0
+  fi
+
+  printf "masked or keyworded%s — run 'emerge -p %s' for the exact keyword or licence, then add it to gentoo/package.accept_keywords" \
+    "${reason:+, by: $reason}" "$a"
 }
 
 # ── resilient emerge: a single masked/keyworded atom aborts the whole set, so
@@ -316,29 +425,108 @@ emerge_install() {
   done
 }
 
+# ── a cause, not just a verdict ───────────────────────────────────────────────
+# Every best-effort step below used to run with `>/dev/null 2>&1`, so a failure
+# reached the ledger as a bare verdict with nothing to act on. That is why the first
+# sweep to finish could only report `ouch: cargo build failed` — the reason (a
+# vendored C++ dep built with -stdlib=libc++) was written to /dev/null, and the
+# operator was left to reproduce an hour-long run to read it (issue #133).
+#
+# So: log to a file, quote the tail in the failure line, and NAME the file so the
+# whole thing is there. The log survives ONLY on failure — the same rule
+# _user_build_zsh already applies to a failed build tree, and for the same reason:
+# something you are told to go and read must still exist when you get there.
+# The redirect target falls back to /dev/null if mktemp fails, so a read-only or
+# full $TMPDIR degrades to the old behaviour rather than aborting the bootstrap.
+_log_path() { # <slug>
+  mktemp "${TMPDIR:-/tmp}/dotfiles-gentoo-$1.XXXXXX.log" 2>/dev/null || true
+}
+
+# The last few lines, flattened to fit one ledger entry. Anything longer belongs in
+# the file, whose path the caller prints alongside this.
+_log_tail() { # <file>
+  [[ -n "${1:-}" && -s "$1" ]] || return 0
+  local t
+  t="$(tail -n 5 "$1" | tr '\n\t' '  ' | tr -s ' ' | cut -c1-240)"
+  # Trim the edges: build output is indented, and a ledger line reading
+  # "failed —   Compiling ..." looks like the message itself is broken.
+  t="${t#"${t%%[![:space:]]*}"}"
+  t="${t%"${t##*[![:space:]]}"}"
+  printf '%s' "$t"
+}
+
 # ── GURU overlay: a handful of core-doctor tools aren't in the main tree but
 # ARE in GURU. Enable GURU (once, best-effort) then emerge them tolerant of
 # failure so a masked/absent atom never aborts the bootstrap. ────────────────────
+
+# Is GURU known to Portage? (eselect repository list -i, or a repos.conf entry /
+# synced repo on disk.) Asked in two places, so it is one function.
+_guru_available() {
+  eselect repository list -i 2>/dev/null | grep -qw guru || [[ -d /var/db/repos/guru ]]
+}
+
+# Enable + sync GURU, ONCE per run. The once-guard is not a micro-optimisation: two
+# call sites now reach this (guru_install and guru_extras_install), and without it a
+# box that cannot enable the overlay would record the SAME failure twice, turning
+# one problem into two entries in a ledger whose whole value is that its length
+# means something.
+_GURU_ENABLE_TRIED=0
+_guru_enable() {
+  ((_GURU_ENABLE_TRIED)) && return 0
+  _GURU_ENABLE_TRIED=1
+  _guru_available && return 0
+  blib_say "enabling the GURU overlay (for sd/glow/xh/carapace/op/ouch)"
+  local log
+  log="$(_log_path guru-enable)"
+  if blib_priv eselect repository enable guru >"${log:-/dev/null}" 2>&1 &&
+    blib_priv emaint sync -r guru >>"${log:-/dev/null}" 2>&1; then
+    [[ -n "$log" ]] && rm -f "$log"
+    return 0
+  fi
+  local cause
+  cause="$(_log_tail "$log")"
+  blib_note_fail "could not enable/sync the GURU overlay — its tools are skipped${cause:+ — $cause}${log:+ (full log: $log)} (needs app-eselect/eselect-repository; enable later with: eselect repository enable guru && emaint sync -r guru)"
+  return 0
+}
+
 guru_install() {
   local -a atoms=("$@")
-  # Is GURU already known to Portage? (eselect repository list -i, or a repos.conf
-  # entry / synced repo on disk). If not, enable + sync it — all best-effort.
-  if ! eselect repository list -i 2>/dev/null | grep -qw guru &&
-    [[ ! -d /var/db/repos/guru ]]; then
-    blib_say "enabling the GURU overlay (for sd/glow/xh/carapace/op)"
-    if blib_priv eselect repository enable guru >/dev/null 2>&1 &&
-      blib_priv emaint sync -r guru >/dev/null 2>&1; then
-      :
-    else
-      blib_note_fail "could not enable/sync the GURU overlay — its tools are skipped (needs app-eselect/eselect-repository; enable later with: eselect repository enable guru && emaint sync -r guru)"
-    fi
-  fi
+  _guru_enable
   # Only attempt the emerge if GURU is actually available now. Reuse the repo's
   # per-atom-tolerant emerge_install so one masked/keyworded GURU atom (e.g.
   # app-misc/yazi) doesn't stop emerge early and skip the rest.
-  if eselect repository list -i 2>/dev/null | grep -qw guru || [[ -d /var/db/repos/guru ]]; then
+  if _guru_available; then
     blib_say "emerge GURU tools (best-effort): ${atoms[*]}"
     emerge_install "${atoms[@]}"
+  fi
+}
+
+# ── the opt-in extras that come from the OVERLAY: the third seam ──────────────
+# There are now three atom lists in this script and they differ along two axes —
+# which tree the atom comes from, and whether --no-extras skips it:
+#
+#   install/packages.txt      ::gentoo, unconditional
+#   guru_install              GURU,     unconditional
+#   extras_install            ::gentoo, opt-in
+#   guru_extras_install       GURU,     opt-in   <- this one
+#
+# app-arch/ouch is the first atom in the fourth cell, so neither existing seam fits:
+# guru_install would install it on a --no-extras run (the one thing that flag
+# promises not to do), and extras_install is validated against ::gentoo by
+# scripts/check-packages.sh check 7, where a GURU-only atom reads as the
+# app-misc/gum bug. Hence a distinct name, which costs one line and gives check 9 an
+# unambiguous target — exactly the argument extras_install already makes for itself.
+#
+# _guru_enable rather than a bare emerge_install: guru_install has normally run by
+# now and the guard makes this a no-op, but --only/--skip and future reordering must
+# not be able to leave this call reaching for an overlay nobody enabled.
+guru_extras_install() {
+  _guru_enable
+  if _guru_available; then
+    blib_say "emerge opt-in GURU tools (best-effort): $*"
+    emerge_install "$@"
+  else
+    blib_note_fail "GURU is not available — the opt-in overlay atoms were skipped: $*"
   fi
 }
 
@@ -379,8 +567,14 @@ _dotfiles_cargo_install() { # <crate> <binary-name>
     return 0
   fi
   blib_say "$2 (cargo build — crate: $1)"
-  cargo install --locked "$1" >/dev/null 2>&1 ||
-    blib_note_fail "$2: cargo build failed — retry later: cargo install --locked $1"
+  local log cause
+  log="$(_log_path "cargo-$2")"
+  if cargo install --locked "$1" >"${log:-/dev/null}" 2>&1; then
+    [[ -n "$log" ]] && rm -f "$log"
+    return 0
+  fi
+  cause="$(_log_tail "$log")"
+  blib_note_fail "$2: cargo build failed${cause:+ — $cause}${log:+ (full log: $log)} — retry later: cargo install --locked $1"
   return 0
 }
 
@@ -394,15 +588,23 @@ _dotfiles_go_install() { # <import-path@version> <binary-name>
   if command -v "$2" >/dev/null 2>&1; then return 0; fi
   local gobin="$HOME/.local/bin"
   mkdir -p "$gobin" 2>/dev/null || true
+  local log cause rc=0
+  log="$(_log_path "go-$2")"
   if command -v go >/dev/null 2>&1; then
-    GOBIN="$gobin" go install "$1" >/dev/null 2>&1 ||
-      blib_note_fail "$2: go install failed — retry later: GOBIN=$gobin go install $1"
+    GOBIN="$gobin" go install "$1" >"${log:-/dev/null}" 2>&1 || rc=1
   elif command -v mise >/dev/null 2>&1; then
-    GOBIN="$gobin" mise exec go@latest -- go install "$1" >/dev/null 2>&1 ||
-      blib_note_fail "$2: go install failed — retry later: GOBIN=$gobin go install $1"
+    GOBIN="$gobin" mise exec go@latest -- go install "$1" >"${log:-/dev/null}" 2>&1 || rc=1
   else
+    [[ -n "$log" ]] && rm -f "$log"
     blib_note_fail "$2: needs Go — install later with: GOBIN=$gobin go install $1"
+    return 0
   fi
+  if ((rc == 0)); then
+    [[ -n "$log" ]] && rm -f "$log"
+    return 0
+  fi
+  cause="$(_log_tail "$log")"
+  blib_note_fail "$2: go install failed${cause:+ — $cause}${log:+ (full log: $log)} — retry later: GOBIN=$gobin go install $1"
   return 0
 }
 
@@ -847,10 +1049,10 @@ provision() {
       # --dry-run promises the full plan, so name both paths: "emerged" vs "built
       # from source" is the single most operationally relevant difference between
       # them (one honours --getbinpkg, the other can only ever compile locally).
-      blib_say "would emerge the opt-in atom: dev-vcs/jj (~arch — see gentoo/package.accept_keywords)"
-      blib_say "would cargo-build the opt-in set: ouch, ast-grep, jnv, watchexec"
+      blib_say "would emerge the opt-in atoms: dev-vcs/jj (::gentoo) and app-arch/ouch (GURU) — both ~arch, see gentoo/package.accept_keywords"
+      blib_say "would cargo-build the opt-in set: ast-grep, jnv, watchexec"
     else
-      blib_say "--no-extras: would skip dev-vcs/jj, and ouch / ast-grep / jnv / watchexec"
+      blib_say "--no-extras: would skip dev-vcs/jj and app-arch/ouch, and ast-grep / jnv / watchexec"
     fi
     ((IS_WSL)) && install_wsl_conf
     return 0
@@ -932,10 +1134,12 @@ provision() {
   # `core doctor` — which is precisely why they were never installed and the
   # doctor was never clean. jj is additive and never replaces git.
   #
-  # Four cargo crates packaged nowhere on Gentoo, plus ONE that IS packaged. jj
-  # comes from ::gentoo (dev-vcs/jj, ~arch) rather than `cargo install jj-cli`
-  # because that hands Portage the upgrade, puts the binary in /usr/bin, and lets
-  # a binhost supply it — `cargo install` can only ever compile it locally.
+  # THREE cargo crates packaged nowhere on Gentoo, plus TWO that ARE packaged and
+  # are emerged instead: dev-vcs/jj from ::gentoo and app-arch/ouch from GURU. Both
+  # moved off cargo for the same reason — it hands Portage the upgrade, puts the
+  # binary in /usr/bin, and lets a binhost supply it, none of which `cargo install`
+  # can do. (For ouch there was a second, blunter reason: the cargo build does not
+  # work here at all. See the note at the call.)
   #
   # It stays HERE rather than moving up to install/packages.txt: packages.txt is
   # the UNCONDITIONAL emerge, and jj is opt-in — an atom there would install on a
@@ -960,12 +1164,23 @@ provision() {
     if [[ -x "$HOME/.cargo/bin/jj" ]]; then
       blib_warn "jj: ~/.cargo/bin/jj (an old 'cargo install jj-cli') shadows the emerged /usr/bin/jj on PATH and will never be upgraded — remove it with: cargo uninstall jj-cli"
     fi
-    _dotfiles_cargo_install ouch ouch
+    # ouch is app-arch/ouch from GURU, NOT `cargo install ouch`. That cargo build
+    # cannot succeed on a GCC/libstdc++ box: its default `unrar` feature pulls
+    # unrar-ng-sys, whose build.rs unconditionally adds -stdlib=libc++. This repo
+    # had written that cause down in gentoo/mise-tools.toml since user mode was
+    # built — the privileged path simply never read its own note, so every run
+    # burned a compile and logged "cargo build failed" (issue #133).
+    #
+    # And the rationale it was kept under does not survive contact either: GURU's
+    # ebuild is 0.8.1, the SAME version as upstream's latest release, so "cargo for
+    # upstream-latest" bought no version and cost the tool. Its src_prepare() seds
+    # that exact flag out. Same move dev-vcs/jj made, one tree over.
+    guru_extras_install app-arch/ouch
     _dotfiles_cargo_install ast-grep ast-grep
     _dotfiles_cargo_install jnv jnv
     _dotfiles_cargo_install watchexec-cli watchexec
   else
-    blib_say "--no-extras: skipping dev-vcs/jj, and ouch / ast-grep / jnv / watchexec"
+    blib_say "--no-extras: skipping dev-vcs/jj and app-arch/ouch, and ast-grep / jnv / watchexec"
   fi
 
   # ── WSL: install /etc/wsl.conf. No systemd=true — Gentoo defaults to OpenRC. ──

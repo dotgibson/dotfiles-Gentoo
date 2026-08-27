@@ -123,12 +123,29 @@ end of the run rather than scrolling past mid-`emerge`.
 | `--dry-run`           | print the full plan — every package, symlink and rewrite — and change nothing                                       |
 | `--no-sync`           | skip the slow `emerge --sync` on re-runs                                                                            |
 | `--links-only`        | re-link configs without touching Portage (needs no privileges)                                                      |
-| `--strict`            | exit non-zero if any best-effort step failed (use this in CI)                                                       |
+| `--strict`            | exit non-zero if any best-effort step failed — see the note under the table                                        |
 | `--no-portage-config` | leave `/etc/portage` alone (keyword/licence-masked atoms are then skipped)                                          |
-| `--no-extras`         | skip the five opt-in tools — `ouch`, `ast-grep`, `jnv`, `watchexec` (cargo builds) and `jj` (`dev-vcs/jj`, emerged) |
+| `--no-extras`         | skip the five opt-in tools — `ast-grep`, `jnv`, `watchexec` (cargo builds), `ouch` (`app-arch/ouch`, GURU) and `jj` (`dev-vcs/jj`, emerged) |
 | `--user`              | install everything into `$HOME` — no `emerge`, no `/etc/portage`, no privileges                                     |
 | `--only zsh,nvim`     | wire ONLY these Core module groups                                                                                  |
 | `--skip tmux`         | wire everything EXCEPT these groups                                                                                 |
+
+**`--strict` is off by default, and that is a decision.** The run always ends with an
+honest ledger of every best-effort step that did not complete; `--strict` turns that
+ledger into a non-zero exit. It is deliberately *not* the default, and deliberately
+not wired into the weekly unstubbed sweep, because the ledger mixes two unlike
+things — a genuine provisioning gap (an atom that will never install here) and an
+infrastructure blip (a rate-limited `mise.run`, a GURU sync hiccup, a failed `tpm`
+clone). A gate that goes red for somebody else's outage is one everybody learns to
+ignore.
+
+What that left missing was any consumer of the ledger at all: the first sweep leg
+ever to run to completion reported a box shipped without `shellcheck` and without
+`ouch`, and went green. The answer is a far-side assertion rather than a stricter
+exit — `make assert-provisioned` checks that every atom in `install/packages.txt`
+actually put its binary on `PATH` (hard failure) and reports the best-effort tools
+separately (warning). Use `--strict` when you want the run itself to carry the exit
+code.
 
 Module groups are `zsh nvim tmux git prompt tools`; they affect wiring only, never
 package provisioning. Run `./bootstrap.sh --help` for the full usage. On a fresh
@@ -225,11 +242,17 @@ This is an **OS-native layer**, so the contribution rule is a boundary rule:
 Local checks, so a change is verified before it is pushed:
 
 ```sh
-make lint             # shellcheck + bash -n + zsh -n (same files, same opts as CI)
-make check-packages   # every atom exists and installs on a stable profile
-make dry-run          # preview a full bootstrap, change nothing
-make                  # the list
+make lint               # shellcheck + bash -n + zsh -n (same files, same opts as CI)
+make check-packages     # every atom exists and installs on a stable profile
+make assert-provisioned # after a real run: every atom actually put its binary on PATH
+make dry-run            # preview a full bootstrap, change nothing
+make                    # the list
 ```
+
+`check-packages` and `assert-provisioned` ask the same question from opposite sides
+of a bootstrap — *could this install?* against a Portage tree, and *did it?* against
+`PATH`. Only the second can see a box that finished green while shipping without a
+tool, which is exactly what happened.
 
 `make check-packages` is the one worth knowing about: it reads real Portage trees
 and fails if `install/packages.txt` names an atom that does not exist, or names one
@@ -237,10 +260,11 @@ with no stable keyword that `gentoo/package.accept_keywords` does not cover — 
 two mistakes this repo has actually made, both previously caught only by hand and
 written up as a comment warning the next person.
 
-It also reads the two atom lists `bootstrap.sh` hard-codes and checks them the same
-way — `guru_install` against the GURU overlay, and the opt-in `extras_install`
-against `::gentoo` — because a third mistake got made in the one place the first
-two checks could not see: `app-misc/gum` sat in that list for months with no
+It also reads the three atom lists `bootstrap.sh` hard-codes and checks them the same
+way — `guru_install` against the GURU overlay, the opt-in `extras_install` against
+`::gentoo`, and the opt-in `guru_extras_install` against GURU — because a third
+mistake got made in the one place the first two checks could not see:
+`app-misc/gum` sat in that list for months with no
 ebuild in either tree, failing every run, while the `accept_keywords` line we
 shipped for it made the tally's "needs a keyword" advice look already taken. So the
 gate now also rejects a keyword line whose atom exists in neither tree — the line
@@ -262,6 +286,29 @@ lands through a PR, which must be up to date with `main` and green on:
 
 `make lint` runs the same shell checks locally, with the same file selection and
 options, so you can be green before you push.
+
+**Upgrading an existing box:** `shellcheck` now comes from `dev-util/shellcheck-bin`
+(upstream's static build, stable on amd64/arm64) rather than `dev-util/shellcheck`,
+which is Haskell and cannot resolve on a stable profile — its blocker is
+`>=dev-haskell/aeson-1.4.0`, one level down, so keywording `shellcheck` itself
+unmasks nothing. The two atoms block each other, so if you previously unmasked the
+GHC chain by hand, take the old one off before re-running:
+
+```sh
+emerge --unmerge dev-util/shellcheck
+```
+
+The bootstrap will not do that for you — removing a package you installed is not its
+call — but its ledger now tells a blocker apart from a mask and names the unmerge.
+
+One thing `check-packages` structurally **cannot** see: it asks, per atom, "does this
+have a stable keyword, or a line in `gentoo/package.accept_keywords`?" — never
+"does it *resolve*?". `dev-util/shellcheck` passed every check in it while being
+flatly uninstallable, because its blocker was a masked *dependency*
+(`>=dev-haskell/aeson-1.4.0`) one level down. Only Portage's resolver can answer
+that, so the `packages` workflow now also runs `emerge -p` over the whole set in the
+container, with the shipped keyword files rendered into `/etc/portage` first. That
+step is advisory for one cycle and then becomes fatal.
 
 Two gates are deliberately **not** required. `packages` (the atom validator)
 fetches a whole Portage tree and has nothing to say about a PR that does not touch
