@@ -65,6 +65,33 @@ jobs:
       # run finishes far inside this, bring it down; if one is cancelled here, check the log
       # for a STALL before raising it, because a cancelled leg is not a hang by itself.
       bootstrap_timeout: 240
+      # THE FAR-SIDE ASSERTION — the line that makes the weekly sweep able to tell a
+      # fully provisioned box from a half-provisioned one. Read statically out of this
+      # block by the same matrix script that reads image/prep/bootstrap_timeout, and run
+      # with `sh -c` from the repo root INSIDE the container, on the far side of a
+      # genuinely unstubbed ./bootstrap.sh (dotgibson/dotfiles-core#750).
+      #
+      # WITHOUT IT THIS LEG ASSERTED NOTHING ABOUT PACKAGES, and said so in green. The
+      # first Gentoo leg ever to run to completion emerged 131 packages over 75 minutes,
+      # printed a ledger naming dev-util/shellcheck and ouch as NOT installed, and passed
+      # — because exiting 0 and keeping its symlinks is all the sweep could check
+      # (dotgibson/dotfiles-core#742, and issue #133 here). Those two tools are fixed now;
+      # this is the check that would have caught them, and catches the next pair.
+      #
+      # NOT --strict. bootstrap.sh's usage() records that decision at length: the ledger
+      # mixes a genuine provisioning gap with an infrastructure blip (a rate-limited
+      # mise.run, a GURU sync hiccup, a failed tpm clone), and --strict cannot tell them
+      # apart, so it would red this lane over somebody else's outage. The script CAN tell
+      # them apart, because it knows which tools install/packages.txt actually promises:
+      # HARD-FAIL on every atom in that file, WARN on the overlay/cargo/go/opt-in tools
+      # that no run promises. So the exit code stays honest and the assertion lives here.
+      #
+      # A COMMAND, not a path — `./scripts/...` works because the script is tracked 100755.
+      # Keep the exec bit, or switch this to `sh scripts/assert-provisioned.sh`.
+      #
+      # Failing here files an issue and blocks nothing: real-bootstrap.yml is advisory and
+      # weekly, so turning this on cannot red a PR.
+      bootstrap_postcheck: ./scripts/assert-provisioned.sh
       # Run provision() for real, with package managers and downloaders replaced by
       # logging no-ops (dotgibson/dotfiles-core#575). --links-only returns BEFORE
       # provision() is entered, so package installation, retries, upstream installers,
