@@ -620,12 +620,19 @@ _dotfiles_go_install() { # <import-path@version> <binary-name>
 #     so uninstalling is `rm` and nothing we wrote can collide with a hand-written
 #     entry or with a file another package owns;
 #   • idempotent — byte-identical content is a no-op, a differing file is backed
-#     up to .pre-dotfiles.<epoch> before being replaced;
+#     up under /var/lib/dotfiles-Gentoo/portage-backups/ before being replaced.
+#     NOT alongside it: Portage reads every file in package.accept_keywords/, so a
+#     backup left there is live config forever and a deleted line never actually
+#     goes away;
 #   • opt-out with --no-portage-config, previewable with --dry-run;
 #   • per-atom lines only. No `*/* ~arch`.
 #
 # __ARCH__ is rendered from `portageq envvar ARCH` so this is correct on arm64 or
 # any other arch, not just amd64.
+# Where a replaced /etc/portage file is preserved. NOT under /etc/portage — see
+# the backup block below for what that cost.
+BACKUP_DIR=/var/lib/dotfiles-Gentoo/portage-backups
+
 _portage_conf_install() { # <src> <portage-subdir>
   local src="$1" dir="/etc/portage/$2" dst="/etc/portage/$2/90-dotfiles-Gentoo"
   local arch rendered current
@@ -688,9 +695,25 @@ _portage_conf_install() { # <src> <portage-subdir>
     return 0
   }
   if [[ -e "$dst" ]]; then
+    # THE BACKUP MUST NOT LAND IN /etc/portage. This used to write
+    # "$dst.pre-dotfiles.<epoch>" — i.e. straight into
+    # /etc/portage/package.accept_keywords/, which Portage reads IN FULL: every
+    # file in that directory is live config, whatever it is called. So each backup
+    # became a permanent second copy of the keyword list, and REMOVING a line from
+    # the file we ship stopped removing it from the box. Measured on a provisioned
+    # machine: three backups, every one still carrying the `dev-util/shellcheck`
+    # line this repo had deleted, so the deletion was a silent no-op there.
+    #
+    # That is this repo's recurring bug in its purest form — a change that looks
+    # applied and is not — and it was hiding inside the safety mechanism. Backups
+    # go to $BACKUP_DIR (under /var/lib), which nothing scans.
+    blib_priv mkdir -p "$BACKUP_DIR" || {
+      blib_note_fail "portage config: could not create $BACKUP_DIR — refusing to back up $dst inside /etc/portage (Portage would read the backup as live config), so $dst is left untouched"
+      return 0
+    }
     # RETURN on a failed backup: writing anyway would destroy the content the
     # backup exists to preserve, while logging "leaving it untouched".
-    blib_priv cp -p "$dst" "$dst.pre-dotfiles.$(date +%s)" || {
+    blib_priv cp -p "$dst" "$BACKUP_DIR/${2//\//_}-90-dotfiles-Gentoo.$(date +%s)" || {
       blib_note_fail "portage config: could not back up $dst — leaving it untouched (fix the backup, then re-run)"
       return 0
     }
@@ -702,6 +725,30 @@ _portage_conf_install() { # <src> <portage-subdir>
   blib_ok "portage config: $dst"
 }
 
+# Backups this repo left in /etc/portage BEFORE the fix above, which are still
+# live config on every box provisioned by an older bootstrap. Fixing where new
+# backups go does nothing for them — and a box carrying one is precisely a box
+# where deleting a keyword line has no effect, which is the failure this whole
+# path exists to stop.
+#
+# WARN, DO NOT DELETE. These are the operator's only copy of whatever was in
+# /etc/portage before this repo first ran; a bootstrap that removes the backup it
+# told you to keep is worse than the bug. blib_warn and not blib_note_fail for the
+# same reason the stale ~/.cargo/bin/jj warning uses it: this is a leftover from an
+# EARLIER run, not a step of this one that failed, and feeding --strict a condition
+# we have deliberately chosen not to fix automatically would make it permanently red.
+_warn_stale_portage_backups() { # <portage-subdir>
+  local dir="/etc/portage/$1" f n=0
+  [[ -d "$dir" ]] || return 0
+  for f in "$dir"/*.pre-dotfiles.*; do
+    [[ -e "$f" ]] || continue
+    n=$((n + 1))
+  done
+  ((n)) || return 0
+  blib_warn "$dir holds $n backup file(s) named *.pre-dotfiles.* that an older bootstrap left THERE — and Portage reads every file in that directory, so each one is still live config. Any keyword line this repo has since removed is still in effect on this box (dev-util/shellcheck is the one that matters today). Review and delete them: ls $dir/*.pre-dotfiles.*"
+  blib_warn "new backups now go to $BACKUP_DIR instead; these are left alone because they may be your only copy of what was in $dir before this repo first ran"
+}
+
 install_portage_config() {
   ((PORTAGE_CONFIG)) || {
     blib_say "--no-portage-config: leaving /etc/portage alone (keyword/licence-masked atoms will be skipped)"
@@ -709,6 +756,8 @@ install_portage_config() {
   }
   _portage_conf_install "$DOTFILES/gentoo/package.accept_keywords" package.accept_keywords
   _portage_conf_install "$DOTFILES/gentoo/package.license" package.license
+  _warn_stale_portage_backups package.accept_keywords
+  _warn_stale_portage_backups package.license
 }
 
 # ── build parallelism ─────────────────────────────────────────────────────────

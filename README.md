@@ -301,6 +301,18 @@ emerge --unmerge dev-util/shellcheck
 The bootstrap will not do that for you — removing a package you installed is not its
 call — but its ledger now tells a blocker apart from a mask and names the unmerge.
 
+**And check `/etc/portage/package.accept_keywords/` for `*.pre-dotfiles.*` files.**
+Older versions of this bootstrap wrote their backups *into* that directory, and
+Portage reads every file there — so each backup is still live config, and a keyword
+line this repo has since deleted is still in effect on your box. New backups go to
+`/var/lib/dotfiles-Gentoo/portage-backups/` instead, and the bootstrap warns when it
+finds old ones, but it will not delete them: they may be your only copy of what was
+in `/etc/portage` before this repo first ran. Review, then remove:
+
+```sh
+ls /etc/portage/package.accept_keywords/*.pre-dotfiles.*
+```
+
 One thing `check-packages` structurally **cannot** see: it asks, per atom, "does this
 have a stable keyword, or a line in `gentoo/package.accept_keywords`?" — never
 "does it *resolve*?". `dev-util/shellcheck` passed every check in it while being
