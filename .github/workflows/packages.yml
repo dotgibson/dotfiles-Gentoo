@@ -129,18 +129,25 @@ jobs:
       # ~arch atom as broken, and it would not exercise the file whose whole job is
       # to make them installable.
       #
-      # ADVISORY (::warning::) FOR NOW, ON PURPOSE. A stage3 container's profile and
-      # USE defaults are not identical to a provisioned box's, so a first red here is
-      # as likely to be a fixture artefact as a real regression.
+      # FATAL, as of this change. It landed advisory because a stage3 container's
+      # profile and USE defaults are not identical to a provisioned box's, so a first
+      # red was as likely to be a fixture artefact as a real regression. That doubt is
+      # paid off: it has run clean on every invocation since it landed — including
+      # twice on `main` after merge — reporting "resolving 42 atoms / every atom
+      # resolves on a stable amd64 profile", matching what the same 42 atoms do
+      # against a real Gentoo box's trees.
       #
-      # FIRST RUN IN CI WAS CLEAN — "resolving 42 atoms / every atom resolves on a
-      # stable amd64 profile", matching what the same set does on a real box. So the
-      # remaining reason to wait is upstream tree churn, not doubt about the fixture.
-      # PROMOTE THIS TO FATAL once it has run clean for a cycle: change the `else` branch's
-      # `::warning::` to `::error::` and add `exit 1` after the log tail. Leaving it
-      # advisory forever would make it the kind of gate this repo's own workflows
-      # keep warning about — one that reads as coverage while asserting nothing.
-      - name: Resolve the whole set with Portage (advisory)
+      # AND ADVISORY WAS COSTING MORE THAN IT LOOKED. Warn-only, this step exits 0
+      # whether it resolved everything or nothing, so a GREEN step and a WARNED step
+      # are indistinguishable in the checks list — you have to open the log to know
+      # which happened. That is the shape this repo's workflows keep warning about: a
+      # gate that reads as coverage while asserting nothing. A warning nobody is
+      # required to read is not a signal, and the reason this step exists at all is
+      # that dev-util/shellcheck sat unresolvable for months behind green checks.
+      #
+      # If a stage3 quirk reds this later, the fix is to make the FIXTURE honest — not
+      # to demote this back to a warning.
+      - name: Resolve the whole set with Portage
         shell: bash
         run: |
           # -e is on: a failed sed or a missing portageq is a broken FIXTURE and must
@@ -175,6 +182,7 @@ jobs:
           if out="$(emerge -p --quiet "${atoms[@]}" 2>&1)"; then
             echo "every atom resolves on a stable $arch profile with the keyword files this repo ships"
           else
-            echo "::warning::Portage could not resolve the atom set — a MASKED DEPENDENCY is the usual cause, and no per-atom check in check-packages.sh can see one. Read which atom the 'have been masked' line quotes; it is often not the one you asked for."
+            echo "::error::Portage could not resolve the atom set — a MASKED DEPENDENCY is the usual cause, and no per-atom check in check-packages.sh can see one. Read which atom the 'have been masked' line quotes; it is often not the one you asked for."
             printf '%s\n' "$out" | tail -n 60
+            exit 1
           fi
