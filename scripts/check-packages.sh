@@ -49,8 +49,20 @@
 #                    needs, which checks 1-3 cannot see because the atom is stable.
 #                    Satisfied either by a stable ebuild at/above the floor, or by a
 #                    version-restricted keyword line (`>=atom-x.y.z ~arch`).
+#   9. opt-in GURU — the fourth atom list: bootstrap.sh's guru_extras_install call,
+#                    which is GURU-sourced AND skipped by --no-extras. Check 5's
+#                    questions, applied to a list neither 5 (unconditional) nor 7
+#                    (::gentoo) can see.
 #
-# Checks 5 and 6 need the GURU overlay. Point GURU_TREE at a checkout, or sync it
+# WHAT NONE OF THESE CAN SEE, and it is worth knowing before you trust a green run:
+# check 3 asks "is THIS atom keyworded", never "does it RESOLVE". dev-util/shellcheck
+# passed every check here for months while being uninstallable, because its blocker
+# was >=dev-haskell/aeson-1.4.0 — a masked DEPENDENCY, one level down. Real
+# dependency resolution needs a profile and a working emerge, which is more than this
+# script assumes; .github/workflows/packages.yml runs `emerge -p` over the whole set
+# in a container to cover it. Keep that step honest, or this blind spot comes back.
+#
+# Checks 5, 6 and 9 need the GURU overlay. Point GURU_TREE at a checkout, or sync it
 # (eselect repository enable guru && emaint sync -r guru). Without it they SKIP —
 # and --require-tree makes that skip fatal, for the reason spelled out below.
 #
@@ -88,7 +100,7 @@ for _arg in "$@"; do
       # list above silently truncates --help mid-sentence, and nothing tests it.
       # The end line is the `GURU_TREE=...` usage line — re-derive it after any
       # edit to the header rather than adjusting it by arithmetic.
-      sed -n '2,61p' "${BASH_SOURCE[0]}"
+      sed -n '2,73p' "${BASH_SOURCE[0]}"
       exit 0
       ;;
     *)
@@ -143,7 +155,7 @@ fi
 GURU_OK=1
 if [[ ! -d "$GURU/app-misc" ]]; then
   if ((REQUIRE_TREE)); then
-    err "no GURU overlay at $GURU, and --require-tree was given — refusing to report success without checking the GURU list"
+    err "no GURU overlay at $GURU, and --require-tree was given — refusing to report success without checking the GURU lists"
     exit 1
   fi
   GURU_OK=0
@@ -151,7 +163,7 @@ fi
 
 say "tree:  $TREE"
 say "arch:  $ARCH"
-if ((GURU_OK)); then say "guru:  $GURU"; else say "guru:  (absent — checks 5-6 skipped)"; fi
+if ((GURU_OK)); then say "guru:  $GURU"; else say "guru:  (absent — checks 5-6 and 9 skipped)"; fi
 
 # ── read the atom list (same stripping rule bootstrap.sh uses) ────────────────
 atoms=()
@@ -169,9 +181,15 @@ say "atoms: ${#atoms[@]}"
 # (`guru_install() {`) is excluded by requiring whitespace or a line-end after the
 # name, and comments are stripped, so a mention in prose cannot smuggle an atom in.
 #
-# Parameterised by callee name because there are now two such lists: guru_install
-# (checks 5-6) and extras_install (check 7). The regexes are built as strings in
-# BEGIN so the name can vary; "\\\\" is one literal backslash in a dynamic regex.
+# Parameterised by callee name because there are now three such lists: guru_install
+# (checks 5-6), extras_install (check 7) and guru_extras_install (check 9). The
+# regexes are built as strings in BEGIN so the name can vary; "\\\\" is one literal
+# backslash in a dynamic regex.
+#
+# The three names are safe to parse independently even though two share a substring:
+# every regex anchors at ^[[:space:]]*<name>, so a `guru_extras_install app-arch/ouch`
+# line cannot be read by the `extras_install` parser (the line does not START with
+# it) nor by the `guru_install` one (`guru_e` != `guru_i`).
 _atoms_from_call() { # <function-name>
   awk -v fn="$1" '
     BEGIN {
@@ -226,6 +244,13 @@ done < <(_atoms_from_call extras_install)
 say "extras atoms: ${#extras_atoms[@]} (from the extras_install call in bootstrap.sh)"
 _require_atoms "${#extras_atoms[@]}" extras_install
 
+guru_extras_atoms=()
+while IFS= read -r line; do
+  [[ -n "$line" ]] && guru_extras_atoms+=("$line")
+done < <(_atoms_from_call guru_extras_install)
+say "opt-in guru atoms: ${#guru_extras_atoms[@]} (from the guru_extras_install call in bootstrap.sh)"
+_require_atoms "${#guru_extras_atoms[@]}" guru_extras_install
+
 # ── the keyword list we ship (atom names only; __ARCH__ is rendered at install) ─
 # A line is EITHER a bare atom (`app-shells/zoxide ~arch` — the atom has no stable
 # ebuild and cannot install at all) or version-restricted (`>=app-editors/neovim-
@@ -256,8 +281,15 @@ if [[ -r "$KEYWORDS" ]]; then
     if [[ "$spec" =~ ^(\>=|\>|\<=|\<|=|~)(.+)$ ]]; then
       op="${BASH_REMATCH[1]}"
       atom="${BASH_REMATCH[2]}"
-      # Strip the trailing -<version>: a version starts at the last `-` followed by
-      # a digit, which is exactly Portage's own rule for splitting P into PN and PV.
+      # Strip the -rN revision, then the trailing -<version>: a version starts at
+      # the last `-` followed by a digit, which is exactly Portage's own rule for
+      # splitting P into PN and PV, and PVR is PV plus an optional -rN. The revision
+      # has to come off FIRST or the rule declines to split at all — in
+      # `>=dev-foo/bar-1.2.3-r2` the last `-` is followed by `r`. No line here
+      # carries one today; bootstrap.sh's _atom_of parses arbitrary emerge output
+      # where they are common, and the two are meant to agree.
+      rev="${atom##*-}"
+      if [[ "$atom" == *-* && "$rev" =~ ^r[0-9]+$ ]]; then atom="${atom%-*}"; fi
       ver="${atom##*-}"
       if [[ "$atom" == *-* && "$ver" =~ ^[0-9] ]]; then
         atom="${atom%-*}"
@@ -372,6 +404,7 @@ say "floors: ${#floors[@]} (\`# min:\` contracts in $(basename "$PKGS"))"
 rc=0
 missing=() unstable_uncovered=() stale=()
 guru_missing=() guru_uncovered=() guru_graduated=() dead_keys=()
+guru_extras_missing=() guru_extras_uncovered=() guru_extras_graduated=()
 extras_missing=() extras_uncovered=()
 floor_unsat=() floor_uncovered=()
 
@@ -436,6 +469,30 @@ if ((GURU_OK)); then
       guru_graduated+=("$atom")
     else
       guru_missing+=("$atom")
+      rc=1
+    fi
+  done
+
+  # 9. The opt-in GURU list. Check 5's three questions over a different call, kept
+  # as its own loop so the messages can name where the atom came from — "move it to
+  # packages.txt" is wrong advice for an atom that --no-extras must be able to skip.
+  for atom in ${guru_extras_atoms[@]+"${guru_extras_atoms[@]}"}; do
+    if [[ "$atom" != */* ]]; then
+      err "$atom — not a category/name atom in the guru_extras_install call"
+      rc=1
+      continue
+    fi
+    if [[ -d "$GURU/$atom" ]]; then
+      if ! _has_stable "$atom" "$GURU" && ! _is_keyworded "$atom"; then
+        guru_extras_uncovered+=("$atom")
+        rc=1
+      fi
+    elif [[ -d "$TREE/$atom" ]]; then
+      # Graduated. Advisory, and the advice differs from check 5's: this atom is
+      # opt-in, so it belongs in the extras_install call, NOT in packages.txt.
+      guru_extras_graduated+=("$atom")
+    else
+      guru_extras_missing+=("$atom")
       rc=1
     fi
   done
@@ -554,16 +611,28 @@ fi
   err "accept_keywords lines for atoms that exist in neither tree — they unmask nothing and hide the real problem:"
   printf '        %s\n' "${dead_keys[@]}" >&2
 }
+((${#guru_extras_missing[@]} == 0)) || {
+  err "bootstrap.sh's opt-in extras block emerges these from GURU, but they exist in NEITHER GURU nor ::gentoo — every run skips them (this is the app-misc/gum bug):"
+  printf '        %s\n' "${guru_extras_missing[@]}" >&2
+}
+((${#guru_extras_uncovered[@]} == 0)) || {
+  err "emerged from GURU by bootstrap.sh's opt-in extras block with no stable keyword for $ARCH and no line in gentoo/package.accept_keywords — a stable profile CANNOT install these:"
+  printf '        %s\n' "${guru_extras_uncovered[@]}" >&2
+}
 ((${#guru_graduated[@]} == 0)) || {
   warn "these are in ::gentoo now — move them from bootstrap.sh's guru_install to install/packages.txt so the main emerge installs them:"
   printf '        %s\n' "${guru_graduated[@]}" >&2
 }
+((${#guru_extras_graduated[@]} == 0)) || {
+  warn "these are in ::gentoo now — move them from bootstrap.sh's guru_extras_install to the extras_install call (NOT to packages.txt: they are opt-in, and packages.txt is the unconditional emerge):"
+  printf '        %s\n' "${guru_extras_graduated[@]}" >&2
+}
 
 if ((rc == 0)); then
   if ((GURU_OK)); then
-    say "OK — every atom (packages.txt + the extras block + the GURU list) exists, is installable on a stable $ARCH profile, and meets every declared \`# min:\` floor"
+    say "OK — every atom (packages.txt + both extras lists + the GURU list) exists, is installable on a stable $ARCH profile, and meets every declared \`# min:\` floor"
   else
-    say "OK — every packages.txt and extras-block atom exists, is installable on a stable $ARCH profile, and meets every declared \`# min:\` floor (GURU absent: the guru_install list was NOT checked)"
+    say "OK — every packages.txt and ::gentoo extras-block atom exists, is installable on a stable $ARCH profile, and meets every declared \`# min:\` floor (GURU absent: the guru_install and guru_extras_install lists were NOT checked)"
   fi
 else
   err "packages.txt / accept_keywords need attention (see above)"

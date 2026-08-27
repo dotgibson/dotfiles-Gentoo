@@ -12,12 +12,14 @@
 # WHY THIS IS NOT OPTIONAL. On a stable profile, several tools in this stack have
 # NO stable-keyworded version in ::gentoo at all, so `emerge` refuses them outright
 # and `core doctor` reports a permanent ✗. Verified on 23.0/desktop, re-checked
-# 2026-08-23:
+# 2026-08-26:
 #
 #     app-shells/zoxide     5 ebuilds, 0 with a stable amd64 keyword
 #     sys-fs/duf            2 ebuilds, 0 with a stable amd64 keyword
-#     dev-util/shellcheck   1 ebuild,  0 with a stable amd64 keyword
 #     dev-util/difftastic   2 ebuilds, 0 with a stable amd64 keyword
+#
+# dev-util/shellcheck was the fourth and is gone from this file on purpose — see
+# the shellcheck note at the bottom before adding it back.
 #
 # THERE ARE NOW TWO KINDS OF LINE HERE, and the difference matters when you read a
 # line and ask whether it is still needed:
@@ -61,8 +63,31 @@ sys-fs/duf ~__ARCH__
 # floor, and check 8 matches it against `# min:0.12.0` in install/packages.txt.
 >=app-editors/neovim-0.12.0 ~__ARCH__
 
+# ── the DEPENDENCY of a below-floor atom, which is a third kind of line ────────
+# Unmasking an atom does not unmask what it needs, and nothing in this file said so
+# until issue #133. EVERY app-editors/neovim 0.12.x in ::gentoo requires
+# >=dev-lua/luv-1.52.1, and the only luv at that version (1.52.1.0) is ~arch on every
+# arch in the tree — so the neovim line above, on its own, has NEVER been enough. A
+# fresh stable box read it, selected neovim 0.12.3, and failed on luv.
+#
+# Every per-atom check in scripts/check-packages.sh passed on this the whole time,
+# and could not have done otherwise: check 3 asks whether NEOVIM is keyworded and
+# check 8 asks whether the keyword line reaches the `# min:` floor. Both are about
+# neovim. Neither can see one level down. It took Portage's own resolver
+# (the `emerge -p` step in .github/workflows/packages.yml) to find it — which is the
+# argument for keeping that step and promoting it to fatal.
+#
+# Version-restricted for the same reason neovim's line is: the older luv ebuilds are
+# stable and should keep tracking stable.
+>=dev-lua/luv-1.52.1 ~__ARCH__
+
 # ── ::gentoo dev/repo tooling, testing-only ───────────────────────────────────
-dev-util/shellcheck ~__ARCH__
+# NB there is NO dev-util/shellcheck line here, and adding one would be the bug
+# issue #133 was filed about. That atom is Haskell: it needs >=dev-haskell/aeson-1.4.0
+# and the rest of the GHC chain, all ~arch, so keywording shellcheck ALONE unmasks
+# nothing and the emerge still fails — while the file you were told to edit now
+# carries the entry you were told to add. install/packages.txt lists
+# dev-util/shellcheck-bin instead, which is STABLE on amd64/arm64 and needs no line.
 dev-util/difftastic ~__ARCH__
 
 # ── ::gentoo, opt-in extras block in bootstrap.sh ─────────────────────────────
@@ -76,6 +101,18 @@ dev-util/difftastic ~__ARCH__
 # are KEYWORDS="~amd64" with no stable version, so without this line the emerge
 # is refused outright — the same shape as zoxide and duf above.
 dev-vcs/jj ~__ARCH__
+
+# ── GURU overlay, opt-in extras block in bootstrap.sh ─────────────────────────
+# The only atom here that is BOTH overlay-sourced and opt-in (skipped by
+# --no-extras), which is why bootstrap.sh has a third seam for it —
+# guru_extras_install — rather than putting it in the unconditional guru_install
+# list. scripts/check-packages.sh check 9 reads it from that call.
+#
+# It was a `cargo install --locked ouch` until issue #133: that build fails on any
+# GCC/libstdc++ box (its default unrar feature pulls unrar-ng-sys, whose build.rs
+# hard-codes -stdlib=libc++), and GURU's ebuild is both at upstream's latest version
+# and already patches that flag out. See install/packages.txt for the full note.
+app-arch/ouch ~__ARCH__
 
 # ── GURU overlay ──────────────────────────────────────────────────────────────
 # GURU ships ebuilds testing-keyworded as a matter of policy, so every atom
@@ -93,6 +130,15 @@ app-shells/direnv ~__ARCH__
 net-analyzer/gping ~__ARCH__
 
 # NB: an ebuild carrying NO keywords at all (some live/9999 ebuilds, and the
-# occasional GURU package) is not reached by `~arch` — it needs `**`. Nothing here
-# requires that today. If an atom is still masked after this file lands, run
-# `emerge -p <atom>`: it prints the exact keyword or licence that is missing.
+# occasional GURU package) is not reached by `~arch` — it needs `**`. The same is
+# true of a LEADING `-*`, which is a stronger statement than "untested here": it
+# masks every arch not named explicitly, and `~arch` cannot reach through it.
+# dev-util/shellcheck-bin (KEYWORDS="-* amd64 ~arm arm64") is the one atom this
+# repo installs that has one, so on x86, ppc64 or riscv it is reachable only with
+# `**` — nothing here requires that today, because the fleet is amd64/arm64.
+#
+# If an atom is still masked after this file lands, run `emerge -p <atom>`: it
+# prints the exact keyword or licence that is missing — AND, when the blocker is a
+# DEPENDENCY rather than the atom itself, it names that dependency instead. Read
+# which atom the "have been masked" line actually quotes before editing this file;
+# bootstrap.sh's own skip hint now does that for you.

@@ -24,7 +24,7 @@ SH_FILES := $(shell git ls-files '*.sh' ':!:core/**')
 ZSH_FILES := $(shell git ls-files '*.zsh' ':!:core/**')
 export SHELLCHECK_OPTS := -e SC1090 -e SC1091 -e SC2015 -e SC2088
 
-.PHONY: help lint shellcheck syntax fmt check-packages dry-run doctor secrets all
+.PHONY: help lint shellcheck syntax fmt check-packages assert-provisioned dry-run doctor secrets all
 
 help: ## Show this help
 	@echo "dotfiles-Gentoo — local checks"
@@ -39,7 +39,7 @@ all: lint check-packages ## Everything CI can check locally
 lint: shellcheck syntax ## shellcheck + bash -n + zsh -n (mirrors the CI gate)
 
 shellcheck: ## Lint repo-owned bash with the fleet's SHELLCHECK_OPTS
-	@command -v shellcheck >/dev/null || { echo "shellcheck not installed (emerge dev-util/shellcheck)"; exit 1; }
+	@command -v shellcheck >/dev/null || { echo "shellcheck not installed (emerge dev-util/shellcheck-bin — NOT dev-util/shellcheck, which is Haskell and cannot resolve on a stable profile; see install/packages.txt)"; exit 1; }
 	@echo "shellcheck $(SH_FILES)"
 	@shellcheck $(SH_FILES)
 
@@ -54,8 +54,15 @@ fmt: ## Apply the 2-space shfmt style (advisory in CI, never blocking)
 	@command -v shfmt >/dev/null || { echo "shfmt not installed (bootstrap.sh go-installs it)"; exit 1; }
 	@shfmt -i 2 -w $(SH_FILES) && echo "formatted $(words $(SH_FILES)) file(s)"
 
-check-packages: ## Verify every atom (packages.txt + the extras block + the GURU list) exists and installs on a stable profile
+check-packages: ## Verify every atom (packages.txt + both extras lists + the GURU list) exists and installs on a stable profile
 	@./scripts/check-packages.sh
+
+# The other half of the same question, asked from the other side of a real run.
+# check-packages asks "could this install?" against a Portage tree; this asks "did
+# it?" against $$PATH, and only the second one can see a box that finished green
+# while shipping without shellcheck (issue #133).
+assert-provisioned: ## After a real bootstrap: assert every packages.txt atom put its binary on PATH
+	@./scripts/assert-provisioned.sh
 
 dry-run: ## Preview a full bootstrap without changing anything
 	@./bootstrap.sh --dry-run
