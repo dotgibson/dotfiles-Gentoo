@@ -118,17 +118,17 @@ submodule step. `bootstrap.sh` is idempotent: it emerges the package list
 layer into place. Anything best-effort that fails is collected and listed at the
 end of the run rather than scrolling past mid-`emerge`.
 
-| Flag                  | Effect                                                                                                              |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `--dry-run`           | print the full plan — every package, symlink and rewrite — and change nothing                                       |
-| `--no-sync`           | skip the slow `emerge --sync` on re-runs                                                                            |
-| `--links-only`        | re-link configs without touching Portage (needs no privileges)                                                      |
-| `--strict`            | exit non-zero if any best-effort step failed — see the note under the table                                        |
-| `--no-portage-config` | leave `/etc/portage` alone (keyword/licence-masked atoms are then skipped)                                          |
+| Flag                  | Effect                                                                                                                                      |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--dry-run`           | print the full plan — every package, symlink and rewrite — and change nothing                                                               |
+| `--no-sync`           | skip the slow `emerge --sync` on re-runs                                                                                                    |
+| `--links-only`        | re-link configs without touching Portage (needs no privileges)                                                                              |
+| `--strict`            | exit non-zero if any best-effort step failed — see the note under the table                                                                 |
+| `--no-portage-config` | leave `/etc/portage` alone (keyword/licence-masked atoms are then skipped)                                                                  |
 | `--no-extras`         | skip the five opt-in tools — `ast-grep`, `jnv`, `watchexec` (cargo builds), `ouch` (`app-arch/ouch`, GURU) and `jj` (`dev-vcs/jj`, emerged) |
-| `--user`              | install everything into `$HOME` — no `emerge`, no `/etc/portage`, no privileges                                     |
-| `--only zsh,nvim`     | wire ONLY these Core module groups                                                                                  |
-| `--skip tmux`         | wire everything EXCEPT these groups                                                                                 |
+| `--user`              | install everything into `$HOME` — no `emerge`, no `/etc/portage`, no privileges                                                             |
+| `--only zsh,nvim`     | wire ONLY these Core module groups                                                                                                          |
+| `--skip tmux`         | wire everything EXCEPT these groups                                                                                                         |
 
 **`--strict` is off by default, and that is a decision.** The run always ends with an
 honest ledger of every best-effort step that did not complete; `--strict` turns that

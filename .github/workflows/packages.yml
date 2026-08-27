@@ -131,8 +131,12 @@ jobs:
       #
       # ADVISORY (::warning::) FOR NOW, ON PURPOSE. A stage3 container's profile and
       # USE defaults are not identical to a provisioned box's, so a first red here is
-      # as likely to be a fixture artefact as a real regression. PROMOTE THIS TO
-      # FATAL once it has run clean for a cycle: change the `else` branch's
+      # as likely to be a fixture artefact as a real regression.
+      #
+      # FIRST RUN IN CI WAS CLEAN — "resolving 42 atoms / every atom resolves on a
+      # stable amd64 profile", matching what the same set does on a real box. So the
+      # remaining reason to wait is upstream tree churn, not doubt about the fixture.
+      # PROMOTE THIS TO FATAL once it has run clean for a cycle: change the `else` branch's
       # `::warning::` to `::error::` and add `exit 1` after the log tail. Leaving it
       # advisory forever would make it the kind of gate this repo's own workflows
       # keep warning about — one that reads as coverage while asserting nothing.
