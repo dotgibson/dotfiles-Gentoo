@@ -1,0 +1,84 @@
+# os/gentoo.capabilities — the Gentoo capability declaration (Core v5, #663/#667).
+# ──────────────────────────────────────────────────────────────────────────────
+# Read (never sourced) by Core's zsh/02-capabilities.zsh into $_CORE_CAP, and by
+# maint/dotfiles-maint.sh, which is bash. bootstrap.sh links it to
+# $ZDOTDIR/os.capabilities via blib_link_os_layer.
+#
+# Transcribed from core/PORTING-MATRIX.md §"Package-manager commands", Gentoo column.
+# Validate with:  core/scripts/check-capabilities.sh os/gentoo.capabilities
+#
+# FULL ATOMS, NOT BARE NAMES. Every verb below takes `category/name`; a bare `neovim`
+# is ambiguous to Portage in a way it is not to apt or dnf. That is why this repo's
+# install/packages.txt is a list of atoms and why nothing here abbreviates.
+#
+# A `#` INSIDE A VALUE IS NOT A COMMENT — the reader keeps it. Notes go above.
+
+# ── package-manager verbs (all required) ──────────────────────────────────────
+PKG_REFRESH=sudo emerge --sync
+# `-a` ALWAYS ASKS, which is the whole reason PKG_ASSUME_YES is absent below: there
+# is no flag that makes this non-interactive, so declaring one would be a lie.
+PKG_UPGRADE=sudo emerge -auvDN @world
+PKG_INSTALL=sudo emerge
+PKG_REMOVE=sudo emerge --depclean
+PKG_SEARCH=emerge -s
+# equery ships in app-portage/gentoolkit, which install/packages.txt installs
+# unconditionally (its own comment there reads `bin:equery`) — so naming it is a
+# promise this repo keeps. --packages warns on this line because it compares the
+# leading BINARY against PACKAGE names and here they differ; the warning is correct
+# to ignore, and it is a warning and not a failure for exactly this case.
+PKG_OWNS=equery belongs
+# A SCRIPT THIS REPO SHIPS, not a command line — the one archive that needs one.
+# Counting on Gentoo means parsing the resolver's answer, and a declaration may not
+# reach into Core's internals (Core's own row calls a private zsh function, which is
+# exactly what an OS repo must not name). scripts/pkg-pending.sh carries the full
+# reasoning, including why `eix -u` is structurally unable to answer this.
+# bootstrap.sh symlinks it to ~/.local/bin/gentoo-pkg-pending, which is on $PATH for
+# both the interactive shell and the maint runner.
+PKG_COUNT_PENDING=gentoo-pkg-pending
+# It prints one atom per line, so the default match (`.`) and field (1) are right.
+
+# ── scheduler (required) ──────────────────────────────────────────────────────
+# OpenRC, not systemd: this box has `crontab` and no systemctl. Core's 55-maint.zsh
+# has had a live cron arm all along; `cron` became expressible in the schema in #665.
+SCHEDULER=cron
+# NO SCHEDULER_UNIT_DIR: cron's entry lives in the user's crontab, not a file of its
+# own. The validator rejects one here rather than letting it read as configured.
+
+# ── how `up` applies ──────────────────────────────────────────────────────────
+# The tree must be current before the resolver runs, and a failed sync ABORTS rather
+# than computing an upgrade against a stale tree.
+PKG_UPGRADE_PRE=sudo emerge --sync
+# NO PKG_ASSUME_YES — see PKG_UPGRADE above; `-a` asks regardless, so `up -y` behaves
+# like `up` and emerge does the asking, which is correct.
+#
+# NO PKG_UPGRADE_PARTIAL. Portage resolves @world as a graph; upgrading a subset is
+# how you strand a consumer against a dependency it pinned. `up -i` REFUSES here,
+# which is how this repo says the world set updates as a whole.
+#
+# NO PKG_CLEANUP. `--depclean` is destructive enough that it must be an operator's
+# deliberate act, never the tail of an upgrade.
+
+# ── how `up` counts ───────────────────────────────────────────────────────────
+# A NON-ZERO EXIT MEANS "COULD NOT ANSWER", so Core reports its unknown sentinel
+# rather than 0. This is the archive the flag exists for: an `emerge --pretend` that
+# cannot resolve (a blocker, a masked dependency, a half-synced tree) is common here,
+# and reporting 0 would say "up to date" while Portage is stuck.
+PKG_COUNT_EXIT_TRUSTED=1
+
+# ── the scheduled runner ──────────────────────────────────────────────────────
+# NO MAINT_UNATTENDED_UPGRADE. A source-based rolling distro that half-upgrades
+# unattended is how you get a box that will not boot — and here the run is hours of
+# compilation that nobody is watching, on a box whose resolver may stop to ask about
+# a blocker it cannot resolve alone. This replaces the `have pacman || have emerge`
+# probe Core used to run. Apply with `up`.
+
+# ── optional tools ────────────────────────────────────────────────────────────
+# A DECLARED LIST REPLACES Core's _CORE_DOCTOR_OPTIN — it does not add to it — so this
+# re-states Core's nine and appends the two Gentoo actually differs on.
+#
+# jj and ast-grep carry ²¹ in PORTING-MATRIX.md's GENTOO cell only (plus Kali's), and
+# this repo's bootstrap.sh installs both in an opt-in extras block that `--no-extras`
+# skips. That is the exact case #666 could not express from a Core-side list: absence
+# here is correct and must not read as a degraded integration, while on Arch, openSUSE
+# and Alpine — which package both — it still should.
+TOOLS_OPTIN=lnav hyperfine watchexec shellcheck shfmt ouch git-absorb jnv gping jj ast-grep

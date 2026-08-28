@@ -1242,6 +1242,14 @@ wire_links() {
   # loader + the default-login-shell switch all live in core/lib/bootstrap-lib.sh.
   blib_link_core "$DOTFILES" "$CONFIG"
   blib_link_os_layer "$DOTFILES" "$CONFIG" gentoo
+  # The pending-update counter os/gentoo.capabilities declares as PKG_COUNT_PENDING.
+  # It has to be reachable BY NAME: a declaration is data, so Core never expands a
+  # path out of it, and the maint runner is a different process with a baked PATH.
+  # ~/.local/bin is the one directory both callers already have — the interactive
+  # shell prepends it (os/gentoo.zsh) and it is the first entry in the runner's PATH
+  # (core/maint/dotfiles-maint.sh) — so the symlink is what makes the declaration
+  # true. blib_link honours BLIB_DRY, so --dry-run stays a preview.
+  blib_link "$DOTFILES/scripts/pkg-pending.sh" "$HOME/.local/bin/gentoo-pkg-pending"
   # shellcheck disable=SC2119  # no args is intentional — writes the default module set
   blib_write_zshrc_loader
   # blib_set_login_shell runs `chsh -s <zsh>`, which needs the shell to be listed
