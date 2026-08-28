@@ -24,7 +24,7 @@ SH_FILES := $(shell git ls-files '*.sh' ':!:core/**')
 ZSH_FILES := $(shell git ls-files '*.zsh' ':!:core/**')
 export SHELLCHECK_OPTS := -e SC1090 -e SC1091 -e SC2015 -e SC2088
 
-.PHONY: help lint shellcheck syntax fmt check-packages assert-provisioned dry-run doctor secrets all
+.PHONY: help lint shellcheck syntax fmt check-packages assert-provisioned dry-run doctor secrets all capabilities
 
 help: ## Show this help
 	@echo "dotfiles-Gentoo — local checks"
@@ -36,7 +36,7 @@ help: ## Show this help
 
 all: lint check-packages ## Everything CI can check locally
 
-lint: shellcheck syntax ## shellcheck + bash -n + zsh -n (mirrors the CI gate)
+lint: shellcheck syntax capabilities ## shellcheck + bash -n + zsh -n (mirrors the CI gate)
 
 shellcheck: ## Lint repo-owned bash with the fleet's SHELLCHECK_OPTS
 	@command -v shellcheck >/dev/null || { echo "shellcheck not installed (emerge dev-util/shellcheck-bin — NOT dev-util/shellcheck, which is Haskell and cannot resolve on a stable profile; see install/packages.txt)"; exit 1; }
@@ -80,3 +80,23 @@ doctor: ## Run core doctor in a Core shell (needs a completed bootstrap)
 secrets: ## Scan the tree + history for committed secrets, under Core's policy
 	@command -v gitleaks >/dev/null || { echo "gitleaks not installed — this would run: gitleaks detect --config core/gitleaks.toml"; exit 1; }
 	@gitleaks detect --no-banner --redact --config core/gitleaks.toml
+
+# ── the OS capability declaration (Core v5, #663/#667) ────────────────────────
+# ONE definition of the schema gates all seven declaring repos: the validator is
+# core/scripts/check-capabilities.sh, vendored with Core, so a schema change arrives
+# with the next sync instead of needing seven hand-written greps to be updated in
+# step. Core's own `make audit` runs the same script over its shipped example and
+# sweeps the fleet for these files; this is the local half of that gate.
+#
+# The glob is guarded because an unmatched glob stays LITERAL in sh — without the
+# test this would "validate" a file named `os/*.capabilities` and pass on nothing,
+# which is the failure mode a gate must never have.
+capabilities: ## Validate os/*.capabilities against Core's schema
+	@rc=0; found=0; \
+	for f in os/*.capabilities; do \
+	  [ -e "$$f" ] || continue; found=1; \
+	  core/scripts/check-capabilities.sh "$$f" --packages install/packages.txt || rc=1; \
+	done; \
+	if [ "$$found" -eq 0 ]; then echo "!! no os/*.capabilities — this repo must declare one (see core/examples/os.capabilities.example)"; rc=1; fi; \
+	exit $$rc
+
