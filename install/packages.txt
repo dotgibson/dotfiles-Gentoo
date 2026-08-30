@@ -132,6 +132,13 @@ dev-util/tree-sitter-cli  # bin:tree-sitter min:0.26.1 — backs nvim-treesitter
                         #   floor, so this needs no keyword line — and no cargo
                         #   build either: bootstrap.sh used to compile the crate on
                         #   every privileged run
+                        #   NB maintainer-needed as of 2026-08-30 — the same hedge
+                        #   as lnav and w3m below, since orphaning is what precedes
+                        #   a treeclean. Availability is unchanged: 0.26.11 is still
+                        #   stable and still clears the floor; it is the maintainer
+                        #   that went away. core/PORTING-MATRIX.md footnote 5 makes
+                        #   the same claim and wants the same hedge — fix it in
+                        #   dotfiles-core, not in the vendored copy here
 dev-vcs/git             # `git subtree` ships with git on Gentoo
 net-misc/openssh        # bin:ssh — client + server (Gentoo ships one package)
 dev-vcs/git-absorb      # `git absorb` — auto-route staged hunks into earlier commits
@@ -174,7 +181,12 @@ dev-util/shellcheck-bin # bin:shellcheck — the linter this repo's own CI gate 
                         #   already holds on the stale ~/.cargo/bin/jj.
 app-benchmarks/hyperfine  # benchmark a command (the `count` corner next to viddy)
 app-admin/lnav          # log navigator. NB ::gentoo carries 0.11.2, three minors
-                        #   behind upstream — the only version in the tree
+                        #   behind upstream — the only version in the tree — and
+                        #   maintainer-needed as of 2026-08-30, which is the
+                        #   orphaning half that w3m's note below already credits to
+                        #   this entry. Also KEYWORDS="amd64 x86", no arm64, so on
+                        #   that arch it is `**`-only; gentoo/package.accept_keywords
+                        #   lists it with the other three and says why none is there
 dev-python/uv           # per-project Python envs + tool running; Core's mise config
                         #   documents the split (mise owns the global interpreter,
                         #   uv owns .venv) and zsh aliases uvr/uvs against it
