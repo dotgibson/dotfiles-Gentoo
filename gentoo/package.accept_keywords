@@ -25,7 +25,7 @@
 # line and ask whether it is still needed:
 #
 #   unreachable — no stable ebuild exists, so the atom cannot install at all. The
-#                 four above, plus dev-vcs/jj and every GURU atom.
+#                 three above, plus dev-vcs/jj and every GURU atom.
 #   below-floor — the atom installs fine on stable, but the stable version is under
 #                 a minimum Core requires. Version-restricted (`>=atom-x.y.z`) so
 #                 that older versions keep tracking stable. One today: neovim.
@@ -100,6 +100,12 @@ dev-util/difftastic ~__ARCH__
 # ::gentoo gained dev-vcs/jj on 2025-12-04. All four ebuilds (0.40.0 - 0.44.0)
 # are KEYWORDS="~amd64" with no stable version, so without this line the emerge
 # is refused outright — the same shape as zoxide and duf above.
+#
+# AMD64-EFFECTIVE ONLY, and left that way on purpose. `~amd64` is the whole
+# keyword list, so on an arm64 box this renders to `dev-vcs/jj ~arm64` and unmasks
+# nothing — an absent keyword is not reached by `~arch`. Reaching it there needs
+# `**`; see the arch scope-limit note at the bottom of this file for why there is
+# no `**` here.
 dev-vcs/jj ~__ARCH__
 
 # ── GURU overlay, opt-in extras block in bootstrap.sh ─────────────────────────
@@ -135,7 +141,46 @@ net-analyzer/gping ~__ARCH__
 # masks every arch not named explicitly, and `~arch` cannot reach through it.
 # dev-util/shellcheck-bin (KEYWORDS="-* amd64 ~arm arm64") is the one atom this
 # repo installs that has one, so on x86, ppc64 or riscv it is reachable only with
-# `**` — nothing here requires that today, because the fleet is amd64/arm64.
+# `**`.
+#
+# NOTHING HERE IS `**`, AND THAT IS A SCOPE LIMIT, NOT AN ALL-CLEAR. This note used
+# to close with "nothing here requires that today, because the fleet is
+# amd64/arm64" — which weighed only the `-*` route and forgot the missing-keyword
+# route the same paragraph opens with. Four atoms take that second route on arm64
+# (dotfiles-Gentoo#144, checked 2026-08-30):
+#
+#     sys-block/dust      KEYWORDS="amd64 ~ppc64"   no arm64 keyword, any ebuild
+#     sys-process/procs   KEYWORDS="amd64 ~ppc64"   no arm64 keyword, any ebuild
+#     app-admin/lnav      KEYWORDS="amd64 x86"      no arm64 keyword, sole ebuild
+#     dev-vcs/jj          KEYWORDS="~amd64"         HAS a line; see it above
+#
+# WHY THEY ARE NOT FIXED HERE — the next reader will want to add four `**` lines,
+# and both reasons against that matter:
+#
+#   `**` IS NOT ARCH-SCOPED. There is no way to write "`**`, but only on arm64" in
+#   a flat file: a bare `sys-block/dust **` also accepts live/9999 ebuilds ON
+#   AMD64, which is the blanket-unmask this file refuses at the top. Doing it
+#   safely means teaching bootstrap.sh to render an arch-conditional BLOCK — a
+#   feature, not four lines.
+#
+#   IT WOULD PLANT THE TRAP the neovim note above exists to prevent. A bare `**`
+#   line records no version operator, so check 4's _is_versioned_keyword guard does
+#   not cover it, and _ebuild_is_stable matches the bare `amd64` inside
+#   KEYWORDS="amd64 ~ppc64" — so scripts/check-packages.sh would report each new
+#   line as "has gone stable, now dead weight, can be dropped", about the only line
+#   making that atom reachable at all.
+#
+# AND THE CAVEAT UNDER ALL OF IT: nothing in this repo has ever checked a second
+# arch. scripts/check-packages.sh hard-codes ARCH=amd64 when portageq is absent and
+# never reads the keyword token from this file at all, and
+# .github/workflows/packages.yml runs the whole gate — `emerge -p` included — in an
+# x86_64 container. bootstrap.sh maps __ARCH__ for six arches (amd64, arm64, arm,
+# x86, ppc64, riscv); that is the templating working, not evidence that the other
+# five were ever booted. Six further atoms are stable on amd64 and `~arm64` only —
+# dev-util/git-delta, app-shells/atuin, net-dns/doggo, app-misc/yq-go,
+# dev-vcs/git-absorb, app-benchmarks/hyperfine — and would each want a plain
+# `~arm64` line in that same future block. Until an arm64 box actually exists, a
+# clean emerge refusal beats a `**` that starts a build upstream never keyworded.
 #
 # If an atom is still masked after this file lands, run `emerge -p <atom>`: it
 # prints the exact keyword or licence that is missing — AND, when the blocker is a
