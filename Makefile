@@ -22,9 +22,13 @@ SHELL := /bin/bash
 # core/ is excluded everywhere: it is vendored and gated upstream by its own CI.
 SH_FILES := $(shell git ls-files '*.sh' ':!:core/**')
 ZSH_FILES := $(shell git ls-files '*.zsh' ':!:core/**')
+# Same pathspec, and it is the one lint-call.yml's markdown leg uses — so `make markdown`
+# scans exactly what the blocking gate scans, recursively. A '*.md' glob would be
+# top-level only and miss all three .github/ templates.
+MD_FILES := $(shell git ls-files '*.md' ':!:core/**')
 export SHELLCHECK_OPTS := -e SC1090 -e SC1091 -e SC2015 -e SC2088
 
-.PHONY: help lint shellcheck syntax fmt check-packages assert-provisioned dry-run doctor secrets all capabilities
+.PHONY: help lint shellcheck syntax markdown fmt check-packages assert-provisioned dry-run doctor secrets all capabilities
 
 help: ## Show this help
 	@echo "dotfiles-Gentoo — local checks"
@@ -32,11 +36,11 @@ help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
 		| awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 	@echo
-	@echo "Repo-owned shell: $(words $(SH_FILES)) .sh, $(words $(ZSH_FILES)) .zsh (core/ excluded)"
+	@echo "Repo-owned shell: $(words $(SH_FILES)) .sh, $(words $(ZSH_FILES)) .zsh, $(words $(MD_FILES)) .md (core/ excluded)"
 
 all: lint check-packages ## Everything CI can check locally
 
-lint: shellcheck syntax capabilities ## shellcheck + bash -n + zsh -n (mirrors the CI gate)
+lint: shellcheck syntax markdown capabilities ## shellcheck + bash -n + zsh -n + markdownlint (mirrors the CI gate)
 
 shellcheck: ## Lint repo-owned bash with the fleet's SHELLCHECK_OPTS
 	@command -v shellcheck >/dev/null || { echo "shellcheck not installed (emerge dev-util/shellcheck-bin — NOT dev-util/shellcheck, which is Haskell and cannot resolve on a stable profile; see install/packages.txt)"; exit 1; }
@@ -49,6 +53,21 @@ syntax: ## Parse-check every repo-owned shell file
 		for f in $(ZSH_FILES); do echo "zsh -n $$f"; zsh -n "$$f" || rc=1; done; \
 	else echo "zsh not installed — skipping zsh -n"; fi; \
 	exit $$rc
+
+# Markdown had no local gate at all, while lint-call.yml's markdown leg has been BLOCKING
+# since dotgibson/dotfiles-core#592 — a required check nobody could run before pushing, and
+# a .markdownlint.jsonc only CI ever read.
+#
+# SKIPS when absent, like `syntax` does for zsh and unlike `shellcheck` above which exits 1.
+# shellcheck is an emerge-able package; markdownlint-cli2 is npm-only, so failing on its
+# absence would red `make lint` on most boxes for something the author cannot cheaply fix.
+# ONE recipe line, so the skip ends the whole target rather than just its first line
+# (dotgibson/dotfiles-core#775).
+markdown: ## markdownlint the repo-owned *.md against .markdownlint.jsonc (skips if absent)
+	@if ! command -v markdownlint-cli2 >/dev/null 2>&1; then \
+	  echo "markdownlint-cli2 not installed — skipping (npm i -g markdownlint-cli2; CI still enforces it)"; \
+	elif [ -z "$(MD_FILES)" ]; then echo "no repo-owned .md"; \
+	else echo "markdownlint-cli2 $(MD_FILES)"; markdownlint-cli2 $(MD_FILES); fi
 
 fmt: ## Apply the 2-space shfmt style (advisory in CI, never blocking)
 	@command -v shfmt >/dev/null || { echo "shfmt not installed (bootstrap.sh go-installs it)"; exit 1; }
