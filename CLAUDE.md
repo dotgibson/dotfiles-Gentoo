@@ -2,7 +2,9 @@
 
 Project memory for Claude Code, auto-loaded every session. For the shared Core
 rules (the load order, the "is it Core?" test, the manifest contract) see
-`core/README.md` and `core/CONTRIBUTING.md`.
+dotfiles-core's [`README.md`](https://github.com/dotgibson/dotfiles-core/blob/main/README.md) and
+[`CONTRIBUTING.md`](https://github.com/dotgibson/dotfiles-core/blob/main/CONTRIBUTING.md) — upstream, not in `core/`, which
+vendors only what a machine actually runs.
 
 ## What this repo is
 
