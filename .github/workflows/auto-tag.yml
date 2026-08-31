@@ -19,4 +19,4 @@ concurrency:
 
 jobs:
   tag:
-    uses: dotgibson/dotfiles-core/.github/workflows/auto-tag-call.yml@v5
+    uses: dotgibson/dotfiles-core/.github/workflows/auto-tag-call.yml@v6
