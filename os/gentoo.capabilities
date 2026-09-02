@@ -4,7 +4,9 @@
 # maint/dotfiles-maint.sh, which is bash. bootstrap.sh links it to
 # $ZDOTDIR/os.capabilities via blib_link_os_layer.
 #
-# Transcribed from core/PORTING-MATRIX.md §"Package-manager commands", Gentoo column.
+# THE SOURCE of core/PORTING-MATRIX.md §"Package-manager commands", Gentoo column —
+# the table is rendered from this file (dotfiles-core#686): edit here, then run
+# `make gen-porting-matrix` in dotfiles-core.
 # Validate with:  core/scripts/check-capabilities.sh os/gentoo.capabilities
 #
 # FULL ATOMS, NOT BARE NAMES. Every verb below takes `category/name`; a bare `neovim`
