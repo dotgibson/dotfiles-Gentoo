@@ -10,6 +10,18 @@
 # shfmt. If the two ever disagree, this one is wrong: the reusable workflow is
 # the gate, this is the local echo of it.
 #
+# THE TARGET NAMES ARE NOT LOCAL CHOICES. dotfiles-core/scripts/make-vocabulary.txt
+# declares one canonical verb set for every repo that vendors Core — help, lint, check,
+# dry-run, packages-check, core-verify, test — because nine repos had grown nine
+# dialects ("dry run" had two spellings, "verify core" had five) and a contributor
+# moving between them re-learned the verbs each time (dotfiles-core#691). Core's
+# `make fleet-vocabulary` renders the verb x repo register and audit-core.sh §5h
+# reports it.
+#
+# The rule is that the CANONICAL NAME EXISTS, not that the historical one dies, so
+# `check-packages` is still here as a two-line alias to `packages-check`. Adding a
+# repo-local target is fine; renaming a canonical one is not.
+#
 # NB core.lock is written by dotfiles-core's sync-core.sh during a fan-out, not
 # here — its own header tells you to run `make core-lock`, a target that has never
 # existed in an OS repo (upstream: dotfiles-core#454). Deliberately not faking it:
@@ -28,7 +40,14 @@ ZSH_FILES := $(shell git ls-files '*.zsh' ':!:core/**')
 MD_FILES := $(shell git ls-files '*.md' ':!:core/**')
 export SHELLCHECK_OPTS := -e SC1090 -e SC1091 -e SC2015 -e SC2088
 
-.PHONY: help lint shellcheck syntax markdown fmt check-packages assert-provisioned dry-run doctor secrets all capabilities
+# Where `core-verify` looks for a dotfiles-core checkout. The verifier is Core's own
+# scripts/core-integrity.sh and is deliberately NOT vendored into core/ (which carries
+# only what a machine runs), so this target needs a sibling clone — the same shape as
+# `make sync` needing one from the other side.
+CORE_REPO ?= $(CURDIR)/../dotfiles-core
+
+.PHONY: help lint shellcheck syntax markdown fmt check packages-check check-packages \
+        assert-provisioned dry-run links-only core-verify test doctor secrets all capabilities
 
 help: ## Show this help
 	@echo "dotfiles-Gentoo — local checks"
@@ -38,7 +57,10 @@ help: ## Show this help
 	@echo
 	@echo "Repo-owned shell: $(words $(SH_FILES)) .sh, $(words $(ZSH_FILES)) .zsh, $(words $(MD_FILES)) .md (core/ excluded)"
 
-all: lint check-packages ## Everything CI can check locally
+# `check` rather than `lint`, because it depends on lint and adds the hermetic
+# --links-only run — which is the thing the bootstrap workflow checks and the one part
+# of CI a plain `make lint` says nothing about.
+all: check test packages-check ## Everything CI can check locally
 
 lint: shellcheck syntax markdown capabilities ## shellcheck + bash -n + zsh -n + markdownlint (mirrors the CI gate)
 
@@ -73,18 +95,73 @@ fmt: ## Apply the 2-space shfmt style (advisory in CI, never blocking)
 	@command -v shfmt >/dev/null || { echo "shfmt not installed (bootstrap.sh go-installs it)"; exit 1; }
 	@shfmt -i 2 -w $(SH_FILES) && echo "formatted $(words $(SH_FILES)) file(s)"
 
-check-packages: ## Verify every atom (packages.txt + both extras lists + the GURU list) exists and installs on a stable profile
+packages-check: ## Verify every atom (packages.txt + both extras lists + the GURU list) exists and installs on a stable profile
 	@./scripts/check-packages.sh
 
+# The pre-#691 spelling, and it is in muscle memory, .github/workflows/packages.yml's
+# header and this repo's README. An alias costs two lines; a rename costs a grep.
+check-packages: packages-check ## (alias) the pre-vocabulary spelling of packages-check
+
 # The other half of the same question, asked from the other side of a real run.
-# check-packages asks "could this install?" against a Portage tree; this asks "did
+# packages-check asks "could this install?" against a Portage tree; this asks "did
 # it?" against $$PATH, and only the second one can see a box that finished green
 # while shipping without shellcheck (issue #133).
 assert-provisioned: ## After a real bootstrap: assert every packages.txt atom put its binary on PATH
 	@./scripts/assert-provisioned.sh
 
+# ── the repo's own suite (the #691 test floor) ────────────────────────────────
+# .PHONY MATTERS HERE and nowhere else in this file: the target shares its name with
+# the `test/` directory it runs, so without the declaration make finds a file called
+# `test`, calls it up to date, and runs NOTHING — a green `make test` over a suite that
+# never executed. It is declared with the rest at the top of the file; this is the note
+# saying why it must stay there.
+#
+# What the suite is for, in one line: the manifest invariants that need no Portage tree.
+# scripts/check-packages.sh is the better check and exits 0 without a tree; packages.yml
+# runs the tree-dependent half properly but is path-filtered. Between them sits a gap
+# that every PR passes through — see test/check-manifests.sh's header.
+test: ## Run the repo's own suite (test/) — the tree-independent manifest invariants
+	@./test/check-manifests.sh
+
 dry-run: ## Preview a full bootstrap without changing anything
 	@./bootstrap.sh --dry-run
+
+links-only: ## Re-wire the symlinks on THIS machine (no emerge, no downloads)
+	@./bootstrap.sh --links-only
+
+# The canonical `check` (#691): lint, then PROVE the symlink graph by building it. Same
+# recipe as dotfiles-Fedora's and dotfiles-Debian's, deliberately — this repo is stamped
+# from Fedora (core/PORTING-MATRIX.md) and the assertions are about Core's link set,
+# which is the same file list in every OS repo.
+#
+# Hermetic: a throwaway $HOME, --links-only (so no emerge, and on Gentoo that is the
+# whole difference between a second and an hour), and the temp tree is removed either
+# way. It asserts what a green bootstrap cannot: that every link LANDED, that the loader
+# is not dangling, that sesh.toml was SEEDED as a copy rather than linked (a link would
+# make a local edit a tracked-file change), and that ~/.zshrc is managed and sources the
+# loader — the file everything else hangs off.
+#
+# The tpm directory is pre-created because bootstrap.sh clones tpm only when it is
+# absent AND git is willing to reach the network; in a hermetic run it is neither, and
+# the failure is noise about tmux plugins rather than anything about symlinks.
+check: lint ## lint + a hermetic --links-only run against a throwaway HOME
+	@tmp=$$(mktemp -d) || { echo "mktemp -d failed — refusing to run bootstrap without a throwaway HOME (unset HOME + a bug in this recipe would run against your real home)"; exit 1; }; \
+	[ -n "$$tmp" ] || { echo "mktemp -d printed nothing — same refusal"; exit 1; }; \
+	mkdir -p "$$tmp/.config/tmux/plugins/tpm"; \
+	echo ":: bootstrap --links-only into $$tmp"; \
+	HOME="$$tmp" ./bootstrap.sh --links-only >/dev/null || { echo "bootstrap failed"; rm -rf "$$tmp"; exit 1; }; \
+	rc=0; \
+	for l in .config/zsh/loader.zsh .config/zsh/80-os.zsh .config/starship.toml \
+	         .config/lazygit/config.yml .config/nvim .vimrc .gitconfig; do \
+	  test -L "$$tmp/$$l" || { echo "MISSING symlink: $$l"; rc=1; }; \
+	done; \
+	test -e "$$tmp/.config/zsh/loader.zsh" || { echo "loader.zsh is dangling"; rc=1; }; \
+	test -f "$$tmp/.config/sesh/sesh.toml" || { echo "sesh.toml not seeded"; rc=1; }; \
+	test -L "$$tmp/.config/sesh/sesh.toml" && { echo "sesh.toml must be a copy, not a link"; rc=1; }; \
+	grep -q "dotfiles-managed v4" "$$tmp/.zshrc" || { echo "~/.zshrc not managed"; rc=1; }; \
+	grep -q "source .*loader.zsh" "$$tmp/.zshrc" || { echo "~/.zshrc does not source the loader"; rc=1; }; \
+	rm -rf "$$tmp"; \
+	test $$rc -eq 0 && printf '\033[32m✓\033[0m symlink graph OK\n' || exit 1
 
 doctor: ## Run core doctor in a Core shell (needs a completed bootstrap)
 	@command -v zsh >/dev/null || { echo "zsh not installed — run ./bootstrap.sh first"; exit 1; }
@@ -99,6 +176,34 @@ doctor: ## Run core doctor in a Core shell (needs a completed bootstrap)
 secrets: ## Scan the tree + history for committed secrets, under Core's policy
 	@command -v gitleaks >/dev/null || { echo "gitleaks not installed — this would run: gitleaks detect --config core/gitleaks.toml"; exit 1; }
 	@gitleaks detect --no-banner --redact --config core/gitleaks.toml
+
+# ── vendored-Core integrity (the canonical `core-verify`, #691) ───────────────
+# core/ is a git subtree copy of dotfiles-core and core.lock records the commit it came
+# from. This asks the one question that matters about it: is the vendored tree still
+# exactly that commit's? A hand-edit under core/ is invisible to every other target
+# here — lint excludes core/ by design, since it is gated upstream.
+#
+# NEEDS A SIBLING dotfiles-core, because the verifier lives there and the core_sha in
+# core.lock only resolves in Core's object store. A stale sibling reports UNVERIFIABLE,
+# which reads like tampering and only means "fetch Core" — so fetch first and say so,
+# rather than leaving the operator to decode it.
+#
+# The default is `../dotfiles-core`, which is the layout on a normal checkout and is
+# NOT the layout inside a git worktree under .claude/worktrees/ — hence the override,
+# and hence the error naming it.
+#
+# The PR-time half of this is .github/workflows/core-integrity.yml, which calls Core's
+# reusable workflow; this is the local echo of it, like `lint` is of lint-call.yml.
+core-verify: ## Verify the vendored core/ is pristine vs core.lock (needs CORE_REPO)
+	@test -x "$(CORE_REPO)/scripts/core-integrity.sh" || { \
+	  echo "need a dotfiles-core checkout at CORE_REPO=$(CORE_REPO)"; \
+	  echo "(the verifier is Core-owned and not vendored into core/; clone it beside this repo, or pass CORE_REPO=/path — a git worktree always needs the override)"; \
+	  exit 1; }
+	@sha=$$(sed -n 's/^core_sha=//p' core.lock); \
+	git -C "$(CORE_REPO)" cat-file -e "$$sha" 2>/dev/null || { \
+	  echo ":: core_sha $$sha is not in $(CORE_REPO) yet — fetching"; \
+	  git -C "$(CORE_REPO)" fetch --quiet origin || true; }
+	@"$(CORE_REPO)/scripts/core-integrity.sh" --self "$(CURDIR)"
 
 # ── the OS capability declaration (Core v5, #663/#667) ────────────────────────
 # ONE definition of the schema gates all seven declaring repos: the validator is

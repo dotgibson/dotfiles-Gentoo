@@ -243,18 +243,35 @@ Local checks, so a change is verified before it is pushed:
 
 ```sh
 make lint               # shellcheck + bash -n + zsh -n (same files, same opts as CI)
-make check-packages     # every atom exists and installs on a stable profile
+make test               # the repo's own suite: the manifest rules that need no Portage tree
+make check              # lint + a hermetic --links-only bootstrap into a throwaway HOME
+make packages-check     # every atom exists and installs on a stable profile
+make core-verify        # the vendored core/ is still the commit core.lock pins
 make assert-provisioned # after a real run: every atom actually put its binary on PATH
 make dry-run            # preview a full bootstrap, change nothing
 make                    # the list
 ```
 
-`check-packages` and `assert-provisioned` ask the same question from opposite sides
+Those verb names are not local choices. Core declares one canonical `make` vocabulary
+for every repo that vendors it — `help`, `lint`, `check`, `dry-run`, `packages-check`,
+`core-verify`, `test` — so the verbs mean the same thing in all nine OS repos
+([dotfiles-core#691][core691]). The pre-vocabulary spelling `make check-packages` still
+works as an alias; the rule is that the canonical name exists, not that the old one dies.
+
+`make test` runs `test/check-manifests.sh`, which asks only the manifest questions whose
+answer needs no Portage tree, no ARCH and no network — atom shape, no atom asked for by
+two lists at once, every `# bin:` and `# min:` contract actually parsing, every keyword
+line going through `__ARCH__`. That sounds redundant next to `packages-check` and is not:
+`packages-check` exits 0 without a tree, and the `packages` workflow that does have one is
+path-filtered, so a PR touching only `bootstrap.sh`'s atom lists got no manifest signal at
+all. It runs on every PR in seconds on a plain runner.
+
+`packages-check` and `assert-provisioned` ask the same question from opposite sides
 of a bootstrap — *could this install?* against a Portage tree, and *did it?* against
 `PATH`. Only the second can see a box that finished green while shipping without a
 tool, which is exactly what happened.
 
-`make check-packages` is the one worth knowing about: it reads real Portage trees
+`make packages-check` is the one worth knowing about: it reads real Portage trees
 and fails if `install/packages.txt` names an atom that does not exist, or names one
 with no stable keyword that `gentoo/package.accept_keywords` does not cover — the
 two mistakes this repo has actually made, both previously caught only by hand and
@@ -381,3 +398,4 @@ Project Link: [dotgibson](https://github.com/dotgibson/)
 [portage-url]: https://wiki.gentoo.org/wiki/Portage
 [eix-shield]: https://img.shields.io/github/v/release/vaeth/eix?style=plastic&logo=gnometerminal&logoColor=24283B&label=eix&labelColor=BB9AF7&color=3D59A1
 [eix-url]: https://github.com/vaeth/eix
+[core691]: https://github.com/dotgibson/dotfiles-core/issues/691
