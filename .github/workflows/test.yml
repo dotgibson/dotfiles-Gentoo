@@ -1,0 +1,59 @@
+# .github/workflows/test.yml
+# Run this repo's own suite (test/) — the manifest invariants that hold on any host.
+#
+# WHY A THIRD WORKFLOW, when lint.yml and packages.yml already exist. The two of them
+# leave a gap that every PR walks through:
+#
+#   • lint.yml calls Core's reusable shell gate — shellcheck, bash -n, zsh -n,
+#     markdownlint. It says nothing about install/packages.txt's CONTENTS.
+#   • packages.yml does, properly, in a stage3 container with a webrsync'd Portage
+#     tree — and it is PATH-FILTERED on purpose (its own header explains the trade:
+#     a filtered gate cannot be required, and a gate that fetches a whole Portage
+#     tree should not be). So a PR that edits bootstrap.sh's atom lists but not
+#     packages.txt gets no manifest signal, and neither does a PR that breaks a
+#     `# bin:` contract.
+#
+# This lane asks only the questions whose answer needs no tree, no ARCH, no profile and
+# no network, so it is cheap enough to run unfiltered on a plain runner in seconds. That
+# is the point: the checks it makes are the ones that were true everywhere and asserted
+# nowhere.
+#
+# NO `paths:` FILTER, for the reason bootstrap.yml and lint.yml record: a required status
+# check that does not run is not "skipped" to a ruleset — it stays PENDING and blocks the
+# PR forever. This gate is cheap and it is worth requiring, so it must always run.
+#
+# ubuntu-latest, NOT a Gentoo container. Deliberate, and it is the whole design: needing
+# a Gentoo image to check a rule that is arch- and tree-independent would make the lane
+# slow and would quietly re-couple it to the fixture. The suite refuses to report success
+# if its own parsers find nothing (see test/check-manifests.sh), which is the guard that
+# keeps "runs anywhere" from decaying into "asserts nothing".
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  manifests:
+    name: manifest invariants (no Portage tree needed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Through `make test` rather than the script path, so the canonical verb
+      # (dotfiles-core#691) is the thing CI exercises: if the Makefile target ever stops
+      # running the suite, this lane notices instead of sailing past it.
+      - name: make test
+        run: make test
