@@ -15,7 +15,7 @@ This is the **OS-native layer for Gentoo**. Confirm the change is in the right r
 ## Verification
 
 - [ ] `make lint` passes (shellcheck + `bash -n` + `zsh -n`)
-- [ ] `make check-packages` passes (every atom exists and installs on a stable profile)
+- [ ] `make packages-check` passes (every atom exists and installs on a stable profile)
 - [ ] `./bootstrap.sh --dry-run` shows the expected plan and nothing else
 - [ ] If it changes provisioning: run on a real Gentoo box, and say which profile
 

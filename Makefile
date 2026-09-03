@@ -28,7 +28,11 @@ ZSH_FILES := $(shell git ls-files '*.zsh' ':!:core/**')
 MD_FILES := $(shell git ls-files '*.md' ':!:core/**')
 export SHELLCHECK_OPTS := -e SC1090 -e SC1091 -e SC2015 -e SC2088
 
-.PHONY: help lint shellcheck syntax markdown fmt check-packages assert-provisioned dry-run doctor secrets all capabilities
+# Path to a dotfiles-core checkout — the reference core-verify diffs the vendored subtree
+# against. Defaults to a sibling clone, the layout sync-core.sh assumes.
+CORE_REPO ?= $(CURDIR)/../dotfiles-core
+
+.PHONY: help lint shellcheck syntax markdown fmt check packages-check check-packages core-verify assert-provisioned dry-run doctor secrets all capabilities
 
 help: ## Show this help
 	@echo "dotfiles-Gentoo — local checks"
@@ -38,7 +42,7 @@ help: ## Show this help
 	@echo
 	@echo "Repo-owned shell: $(words $(SH_FILES)) .sh, $(words $(ZSH_FILES)) .zsh, $(words $(MD_FILES)) .md (core/ excluded)"
 
-all: lint check-packages ## Everything CI can check locally
+all: lint packages-check ## Everything CI can check locally
 
 lint: shellcheck syntax markdown capabilities ## shellcheck + bash -n + zsh -n + markdownlint (mirrors the CI gate)
 
@@ -73,8 +77,60 @@ fmt: ## Apply the 2-space shfmt style (advisory in CI, never blocking)
 	@command -v shfmt >/dev/null || { echo "shfmt not installed (bootstrap.sh go-installs it)"; exit 1; }
 	@shfmt -i 2 -w $(SH_FILES) && echo "formatted $(words $(SH_FILES)) file(s)"
 
-check-packages: ## Verify every atom (packages.txt + both extras lists + the GURU list) exists and installs on a stable profile
+# ── the canonical fleet verbs (dotgibson/dotfiles-core#691) ───────────────────
+# `check`, `packages-check` and `core-verify` are three of the seven names every repo that
+# vendors Core must answer to (Core's scripts/make-vocabulary.txt; `make fleet-vocabulary`
+# there renders the register that checks it). Before that list, "check packages" was
+# `packages-check` in three repos and `check-packages` here, "verify core" had five
+# spellings and "dry run" two — only `help` was common to every Makefile, so a contributor
+# re-learned the verbs in each repo and no gate noticed. The requirement is that the
+# CANONICAL name exists, not that a historical one dies: `check-packages` stays as an alias.
+
+packages-check: ## Verify every atom (packages.txt + both extras lists + the GURU list) exists and installs on a stable profile
 	@./scripts/check-packages.sh
+
+# This repo's historical spelling for the target above — the fleet's odd one out, and the
+# reason the vocabulary picked a direction. Kept so anything already calling it works.
+check-packages: packages-check ## (alias) the pre-#691 spelling of packages-check
+
+check: lint ## lint + a hermetic --links-only run against a throwaway HOME
+	@# `lint` proves the repo-owned shell parses; this proves the installer still wires the
+	@# symlink graph Core's loader expects. --links-only needs no privileges and touches
+	@# nothing outside the throwaway HOME, so it is safe to run on a live box.
+	@#
+	@# GENTOO ONLY: bootstrap.sh reads /etc/os-release and refuses without ID=gentoo, by
+	@# design. Off Gentoo this fails with that message rather than reporting a green it did
+	@# not earn; the container equivalent runs from .github/workflows/bootstrap.yml.
+	@#
+	@# tpm is pre-created because blib_link_core clones the tmux plugin manager into it on
+	@# a first run; this asserts symlinks, not network.
+	@tmp=$$(mktemp -d); \
+	mkdir -p "$$tmp/.config/tmux/plugins/tpm"; \
+	echo ":: bootstrap --links-only into $$tmp"; \
+	HOME="$$tmp" ./bootstrap.sh --links-only >/dev/null || { echo "bootstrap failed"; rm -rf "$$tmp"; exit 1; }; \
+	rc=0; \
+	for l in .config/zsh/loader.zsh .config/zsh/80-os.zsh .config/starship.toml \
+	         .config/lazygit/config.yml .config/nvim .vimrc .gitconfig; do \
+	  test -L "$$tmp/$$l" || { echo "MISSING symlink: $$l"; rc=1; }; \
+	done; \
+	test -e "$$tmp/.config/zsh/loader.zsh" || { echo "loader.zsh is dangling"; rc=1; }; \
+	test -f "$$tmp/.config/sesh/sesh.toml" || { echo "sesh.toml not seeded"; rc=1; }; \
+	test -L "$$tmp/.config/sesh/sesh.toml" && { echo "sesh.toml must be a copy, not a link"; rc=1; }; \
+	grep -q "dotfiles-managed v4" "$$tmp/.zshrc" || { echo "~/.zshrc not managed"; rc=1; }; \
+	grep -q "source .*loader.zsh" "$$tmp/.zshrc" || { echo "~/.zshrc does not source the loader"; rc=1; }; \
+	rm -rf "$$tmp"; \
+	test $$rc -eq 0 && printf '\033[32m✓\033[0m symlink graph OK\n' || exit 1
+
+# The provenance half of the vocabulary, which this repo had no local answer to at all:
+# core-integrity.yml ran it in CI and nothing ran it here. It must be driven from a
+# dotfiles-core CHECKOUT, not from the vendored copy under core/ — the check resolves
+# <core_sha>^{tree} in Core's object store, and a `git subtree --squash` brings the tree,
+# not the lineage. Same invocation CI uses:
+#   make core-verify CORE_REPO=/path/to/dotfiles-core
+core-verify: ## Verify the vendored core/ is pristine vs core.lock (needs CORE_REPO)
+	@[ -x "$(CORE_REPO)/scripts/core-integrity.sh" ] || { \
+	  echo "need a dotfiles-core checkout at CORE_REPO=$(CORE_REPO)"; exit 1; }
+	@"$(CORE_REPO)/scripts/core-integrity.sh" --self "$(CURDIR)"
 
 # The other half of the same question, asked from the other side of a real run.
 # check-packages asks "could this install?" against a Portage tree; this asks "did

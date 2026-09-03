@@ -243,18 +243,27 @@ Local checks, so a change is verified before it is pushed:
 
 ```sh
 make lint               # shellcheck + bash -n + zsh -n (same files, same opts as CI)
-make check-packages     # every atom exists and installs on a stable profile
+make check              # lint + a hermetic --links-only run (on a Gentoo box)
+make packages-check     # every atom exists and installs on a stable profile
 make assert-provisioned # after a real run: every atom actually put its binary on PATH
 make dry-run            # preview a full bootstrap, change nothing
+make core-verify        # is the vendored core/ pristine vs core.lock?
 make                    # the list
 ```
 
-`check-packages` and `assert-provisioned` ask the same question from opposite sides
+`lint`, `check`, `dry-run`, `packages-check` and `core-verify` are five of the seven
+canonical verbs every repo that vendors Core answers to — declared once in
+`dotfiles-core`'s `scripts/make-vocabulary.txt`, so a target means the same thing in
+every repo in the fleet
+([dotgibson/dotfiles-core#691](https://github.com/dotgibson/dotfiles-core/issues/691)).
+`check-packages` is kept as an alias of `packages-check`; nothing that calls it breaks.
+
+`packages-check` and `assert-provisioned` ask the same question from opposite sides
 of a bootstrap — *could this install?* against a Portage tree, and *did it?* against
 `PATH`. Only the second can see a box that finished green while shipping without a
 tool, which is exactly what happened.
 
-`make check-packages` is the one worth knowing about: it reads real Portage trees
+`make packages-check` is the one worth knowing about: it reads real Portage trees
 and fails if `install/packages.txt` names an atom that does not exist, or names one
 with no stable keyword that `gentoo/package.accept_keywords` does not cover — the
 two mistakes this repo has actually made, both previously caught only by hand and
