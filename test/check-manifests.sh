@@ -249,7 +249,14 @@ while IFS= read -r line; do
   if [[ ! "${f[0]}" =~ ^(\<|\<=|=|\>=|\>|~)?[a-z0-9]+(-[a-z0-9]+)*/[A-Za-z0-9][A-Za-z0-9._+-]*$ ]]; then
     note "shape: $KEYWORDS:$lineno ('${f[0]}') is not an atom spec"
   fi
-  if [[ "${f[1]}" != '~__ARCH__' && "${f[1]}" != '__ARCH__' && "${f[1]}" != '**' ]]; then
+  # `**` is deliberately excluded: this file's own header (the "arch scope-limit"
+  # note at its bottom) says NOTHING HERE IS `**` — a `**` keyword is not
+  # arch-scoped, so a `sys-block/dust **` accepts live/9999 ebuilds on every arch,
+  # which is the blanket-unmask the top of the file refuses in another form. Two
+  # rules, one policy: no `*/*` atom (checked above) and no `**` keyword.
+  if [[ "${f[1]}" == '**' ]]; then
+    note "__ARCH__: $KEYWORDS:$lineno keywords ${f[0]} as '**' — this file's header forbids that (a \`**\` is not arch-scoped and accepts live/9999 ebuilds on every arch, the blanket-unmask in a second form); use ~__ARCH__, or if the atom is unreachable in the tree, drop it rather than force it"
+  elif [[ "${f[1]}" != '~__ARCH__' && "${f[1]}" != '__ARCH__' ]]; then
     note "__ARCH__: $KEYWORDS:$lineno keywords ${f[0]} as '${f[1]}' — use ~__ARCH__, which bootstrap.sh renders from \`portageq envvar ARCH\`; a hard-coded keyword installs cleanly and unmasks nothing off that arch"
   fi
 done <"$KEYWORDS"

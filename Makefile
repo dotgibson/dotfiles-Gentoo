@@ -145,7 +145,8 @@ links-only: ## Re-wire the symlinks on THIS machine (no emerge, no downloads)
 # absent AND git is willing to reach the network; in a hermetic run it is neither, and
 # the failure is noise about tmux plugins rather than anything about symlinks.
 check: lint ## lint + a hermetic --links-only run against a throwaway HOME
-	@tmp=$$(mktemp -d); \
+	@tmp=$$(mktemp -d) || { echo "mktemp -d failed — refusing to run bootstrap without a throwaway HOME (unset HOME + a bug in this recipe would run against your real home)"; exit 1; }; \
+	[ -n "$$tmp" ] || { echo "mktemp -d printed nothing — same refusal"; exit 1; }; \
 	mkdir -p "$$tmp/.config/tmux/plugins/tpm"; \
 	echo ":: bootstrap --links-only into $$tmp"; \
 	HOME="$$tmp" ./bootstrap.sh --links-only >/dev/null || { echo "bootstrap failed"; rm -rf "$$tmp"; exit 1; }; \
