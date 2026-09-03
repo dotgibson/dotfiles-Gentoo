@@ -145,11 +145,31 @@ links-only: ## Re-wire the symlinks on THIS machine (no emerge, no downloads)
 # absent AND git is willing to reach the network; in a hermetic run it is neither, and
 # the failure is noise about tmux plugins rather than anything about symlinks.
 check: lint ## lint + a hermetic --links-only run against a throwaway HOME
+	@# HOME IS NOT ENOUGH TO MAKE THIS HERMETIC, which is what the word promises and what
+	@# this recipe did not deliver (dotgibson/dotfiles-core#852). bootstrap.sh resolves its
+	@# target as `CONFIG="$${XDG_CONFIG_HOME:-$$HOME/.config}"`, and core/lib/bootstrap-lib.sh
+	@# does the same for the rest — `: "$${XDG_CONFIG_HOME:=…}"`, `XDG_STATE_HOME`,
+	@# `XDG_CACHE_HOME`, `XDG_DATA_HOME`, then `: "$${ZDOTDIR:=$$XDG_CONFIG_HOME/zsh}"`. Those
+	@# defaults apply ONLY when the variable is unset, so for anyone who exports
+	@# XDG_CONFIG_HOME — a fair share of the people who run a dotfiles repo's gate — this
+	@# wrote Core into their REAL config dir and then failed its own assertions, which look
+	@# under $$tmp. The mktemp guard below was already refusing to run bootstrap "against your
+	@# real home"; this is the other half of that same promise, and the leak it missed.
+	@#
+	@# Reproduced against the byte-identical recipe in dotfiles-Fedora, on a Fedora 44 box
+	@# (dotgibson/dotfiles-Fedora#153): the whole tree — zsh/, nvim, starship.toml, tmux, git,
+	@# mise, lazygit, atuin, jj, sesh, tealdeer — landed in the exported XDG_CONFIG_HOME while
+	@# the target reported MISSING symlinks on a perfectly good checkout. Only the package
+	@# manager differs; the --links-only path and the Core lib it calls are the same code, and
+	@# this repo's bootstrap refuses to run off a Gentoo box. dotfiles-openSUSE reached the
+	@# `env -u` fix first, on its own.
 	@tmp=$$(mktemp -d) || { echo "mktemp -d failed — refusing to run bootstrap without a throwaway HOME (unset HOME + a bug in this recipe would run against your real home)"; exit 1; }; \
 	[ -n "$$tmp" ] || { echo "mktemp -d printed nothing — same refusal"; exit 1; }; \
+	trap 'rm -rf "$$tmp"' EXIT INT TERM; \
 	mkdir -p "$$tmp/.config/tmux/plugins/tpm"; \
 	echo ":: bootstrap --links-only into $$tmp"; \
-	HOME="$$tmp" ./bootstrap.sh --links-only >/dev/null || { echo "bootstrap failed"; rm -rf "$$tmp"; exit 1; }; \
+	env -u XDG_CONFIG_HOME -u XDG_DATA_HOME -u XDG_STATE_HOME -u XDG_CACHE_HOME -u ZDOTDIR \
+	    HOME="$$tmp" ./bootstrap.sh --links-only >/dev/null || { echo "bootstrap failed"; exit 1; }; \
 	rc=0; \
 	for l in .config/zsh/loader.zsh .config/zsh/80-os.zsh .config/starship.toml \
 	         .config/lazygit/config.yml .config/nvim .vimrc .gitconfig; do \
@@ -158,9 +178,8 @@ check: lint ## lint + a hermetic --links-only run against a throwaway HOME
 	test -e "$$tmp/.config/zsh/loader.zsh" || { echo "loader.zsh is dangling"; rc=1; }; \
 	test -f "$$tmp/.config/sesh/sesh.toml" || { echo "sesh.toml not seeded"; rc=1; }; \
 	test -L "$$tmp/.config/sesh/sesh.toml" && { echo "sesh.toml must be a copy, not a link"; rc=1; }; \
-	grep -q "dotfiles-managed v4" "$$tmp/.zshrc" || { echo "~/.zshrc not managed"; rc=1; }; \
-	grep -q "source .*loader.zsh" "$$tmp/.zshrc" || { echo "~/.zshrc does not source the loader"; rc=1; }; \
-	rm -rf "$$tmp"; \
+	grep -q "dotfiles-managed v4" "$$tmp/.zshrc" 2>/dev/null || { echo "~/.zshrc not managed"; rc=1; }; \
+	grep -qE '^[^#]*source .*loader\.zsh' "$$tmp/.zshrc" 2>/dev/null || { echo "~/.zshrc does not source the loader"; rc=1; }; \
 	test $$rc -eq 0 && printf '\033[32m✓\033[0m symlink graph OK\n' || exit 1
 
 doctor: ## Run core doctor in a Core shell (needs a completed bootstrap)
