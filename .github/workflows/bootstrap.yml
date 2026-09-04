@@ -41,7 +41,7 @@ permissions:
 
 jobs:
   test:
-    uses: dotgibson/dotfiles-core/.github/workflows/bootstrap-test.yml@v6
+    uses: dotgibson/dotfiles-core/.github/workflows/bootstrap-test.yml@v7
     with:
       image: gentoo/stage3:latest
       prep: "grep -qE \"^ID='?gentoo\" /etc/os-release 2>/dev/null || echo \"ID='gentoo'\" >> /etc/os-release"
