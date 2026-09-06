@@ -12,9 +12,9 @@
 # WHY THIS IS NOT OPTIONAL. On a stable profile, several tools in this stack have
 # NO stable-keyworded version in ::gentoo at all, so `emerge` refuses them outright
 # and `core doctor` reports a permanent ✗. Verified on 23.0/desktop, re-checked
-# 2026-08-26:
+# 2026-09-06:
 #
-#     app-shells/zoxide     5 ebuilds, 0 with a stable amd64 keyword
+#     app-shells/zoxide     6 ebuilds, 0 with a stable amd64 keyword
 #     sys-fs/duf            2 ebuilds, 0 with a stable amd64 keyword
 #     dev-util/difftastic   2 ebuilds, 0 with a stable amd64 keyword
 #
@@ -97,7 +97,7 @@ dev-util/difftastic ~__ARCH__
 # check 7 reads it from the extras_install call, the same way checks 5-6 read the
 # guru_install list.
 #
-# ::gentoo gained dev-vcs/jj on 2025-12-04. All four ebuilds (0.40.0 - 0.44.0)
+# ::gentoo gained dev-vcs/jj on 2025-12-04. All five ebuilds (0.40.0 - 0.45.1)
 # are KEYWORDS="~amd64" with no stable version, so without this line the emerge
 # is refused outright — the same shape as zoxide and duf above.
 #
@@ -116,8 +116,8 @@ dev-vcs/jj ~__ARCH__
 #
 # It was a `cargo install --locked ouch` until issue #133: that build fails on any
 # GCC/libstdc++ box (its default unrar feature pulls unrar-ng-sys, whose build.rs
-# hard-codes -stdlib=libc++), and GURU's ebuild is both at upstream's latest version
-# and already patches that flag out. See install/packages.txt for the full note.
+# hard-codes -stdlib=libc++), and GURU's ebuild already patches that flag out while
+# trailing upstream by one patch release. See install/packages.txt for the full note.
 app-arch/ouch ~__ARCH__
 
 # ── GURU overlay ──────────────────────────────────────────────────────────────
