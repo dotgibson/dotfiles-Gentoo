@@ -112,7 +112,7 @@ cd ~/dotfiles-Gentoo
 exec zsh
 ```
 
-`core/` is a vendored subtree and is **already present** in a clone — there is no
+`core/` is a vendored copy and is **already present** in a clone — there is no
 submodule step. `bootstrap.sh` is idempotent: it emerges the package list
 (skipping and reporting any keyword-masked atom) and symlinks Core + the Gentoo
 layer into place. Anything best-effort that fails is collected and listed at the
