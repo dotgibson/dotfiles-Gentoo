@@ -5,7 +5,7 @@
 #
 # Heads-up: several modern Rust CLIs are ~amd64 (testing-keyworded) on a stable
 # profile, and THREE of them have NO stable ebuild at all: app-shells/zoxide,
-# sys-fs/duf and dev-util/difftastic. (Checked 2026-08-26 — this count is what the
+# sys-fs/duf and dev-util/difftastic. (Checked 2026-09-06 — this count is what the
 # next reader uses to judge whether a new atom needs a keyword line, so re-check it
 # rather than trusting it. It was FOUR until dev-util/shellcheck was swapped for
 # dev-util/shellcheck-bin, which is stable — see that atom's note below.) A fourth
@@ -90,11 +90,12 @@ app-misc/yq-go          # bin:yq — mikefarah's GO yq (NOT app-misc/yq, which i
 #   -stdlib=libc++. gentoo/mise-tools.toml has documented that cause since user
 #   mode was written; the privileged path just never read its own note, and every
 #   sweep logged a bare "cargo build failed" (issue #133).
-#   GURU's app-arch/ouch is 0.8.1 — the SAME version as upstream's latest release,
-#   so the route-around bought zero version advantage — and its src_prepare() seds
-#   that exact flag out. So: Portage owns the upgrade, the binary lands in
-#   /usr/bin, a binhost can supply it, and it actually builds. Same reasoning that
-#   moved dev-vcs/jj off `cargo install jj-cli`, one tree over.
+#   GURU's app-arch/ouch is 0.8.1, ONE patch release behind upstream's 0.8.2
+#   (2026-08-31) — so the route-around bought no meaningful version advantage and
+#   cost the build — and its src_prepare() seds that exact flag out. So: Portage
+#   owns the upgrade, the binary lands in /usr/bin, a binhost can supply it, and
+#   it actually builds. Same reasoning that moved dev-vcs/jj off
+#   `cargo install jj-cli`, one tree over.
 #   It is opt-in, so it is NOT in the unconditional guru_install list and NOT in
 #   this file — bootstrap.sh has a `guru_extras_install` seam for the one pairing
 #   neither existing list covers (overlay-sourced AND skipped by --no-extras).
