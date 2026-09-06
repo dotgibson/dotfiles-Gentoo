@@ -13,10 +13,17 @@ model (Core → OS-native → Role). Stamped from the Fedora template (see `core
 
 ## The rule that bites
 
-`core/` is a **vendored `git subtree` copy of [dotfiles-core](https://github.com/dotgibson/dotfiles-core)** — it
+`core/` is a **vendored copy of [dotfiles-core](https://github.com/dotgibson/dotfiles-core)** — it
 is *not* editable here. Anything you change under `core/` is overwritten on the
 next sync. To change shared Core config, edit it **in dotfiles-core**, run
 `make audit` there, then `make sync` to fan it out to every OS repo.
+
+The sync is a **pinned fetch plus `git read-tree --prefix=core/`**, with `core.lock`
+recording the commit — **not** `git subtree` (dotgibson/dotfiles-core#587). That distinction
+has teeth: `git subtree pull` moves `core/` without moving `core.lock`, and `core-integrity`
+then reports the tree as **TAMPERED**. There is no local fix, because `core.lock` is written
+by `sync-core.sh` in the same commit as the vendor — re-run the fan-out instead.
+`core/VENDORING.md` has the mechanism.
 
 What belongs **here** is only the OS-native layer: the `emerge` package list (atoms), clipboard + paths, and the bootstrap.
 
