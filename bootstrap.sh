@@ -133,9 +133,12 @@ while [[ $# -gt 0 ]]; do case "$1" in
 # with a cryptic `source: No such file`.
 for _req in core/zsh/loader.zsh core/lib/ux.sh core/lib/bootstrap-lib.sh; do
   if [[ ! -e "$DOTFILES/$_req" ]]; then
-    echo "core/ subtree missing or incomplete (need $_req). One-time, run:" >&2
-    echo "  git subtree add  --prefix=core <dotfiles-core remote> main --squash   # first time" >&2
-    echo "  git subtree pull --prefix=core <dotfiles-core remote> main --squash   # to update" >&2
+    echo "vendored core/ missing or incomplete (need $_req). To populate it:" >&2
+    echo "  make sync          # in dotfiles-core — the fan-out that also stamps core.lock" >&2
+    echo "If core/ does not exist AT ALL the fan-out skips this repo; do the one-time" >&2
+    echo "vendor first, from a RELEASED TAG (never main, or core-integrity reports the" >&2
+    echo "fresh tree as TAMPERED), then sync:" >&2
+    echo "  git subtree add --prefix=core <dotfiles-core remote> refs/tags/v7 --squash" >&2
     exit 1
   fi
 done
