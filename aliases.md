@@ -34,13 +34,13 @@ privilege-escalation muscle memory works without changes. Package names are full
 
 ## Clipboard / WSL / Navigation
 
-| Alias      | Expands To                            | Condition            |
-| ---------- | ------------------------------------- | -------------------- |
-| `pbcopy`   | `clip`                                | clip available       |
-| `pbpaste`  | `clip-paste`                          | clip-paste available |
-| `dotsync`  | `cd "$HOME/dotfiles-Gentoo"`          | always               |
-| `opsignin` | `eval "$(op signin)"`                 | 1Password CLI        |
-| `localip`  | `ip -brief -4 addr show scope global` | always               |
-| `open`     | `explorer.exe`                        | WSL                  |
-| `xdg-open` | `wslview`                             | WSL + wslview        |
-| `cdwin`    | `cd "$WINHOME"`                       | WSL + WINHOME set    |
+| Alias      | Expands To                                                           | Condition                                                                |
+| ---------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `pbcopy`   | `clip`                                                               | clip available                                                           |
+| `pbpaste`  | `clip-paste`                                                         | clip-paste available                                                     |
+| `dotsync`  | `cd` to this checkout (resolved from the symlink, wherever it lives) | always — falls back to `cd "$HOME/dotfiles-Gentoo"` if the resolve fails |
+| `opsignin` | `eval "$(op signin)"`                                                | 1Password CLI                                                            |
+| `localip`  | `ip -brief -4 addr show scope global`                                | always                                                                   |
+| `open`     | `explorer.exe`                                                       | WSL                                                                      |
+| `xdg-open` | `wslview`                                                            | WSL + wslview                                                            |
+| `cdwin`    | `cd "$WINHOME"`                                                      | WSL + WINHOME set                                                        |
