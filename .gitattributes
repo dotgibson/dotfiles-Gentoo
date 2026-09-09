@@ -1,0 +1,2 @@
+# Keep the README hero from ever being CRLF-normalised or diffed as text.
+*.gif binary
