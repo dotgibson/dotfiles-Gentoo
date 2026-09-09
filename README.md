@@ -60,6 +60,8 @@
 <!-- ABOUT THE PROJECT -->
 ## About The Project
 
+[![dotfiles-Gentoo — terminal demo][product-screenshot]](https://dotgibson.github.io/dotfiles-web)
+
 **`dotfiles-Gentoo` is the OS-native layer for Gentoo** — the capstone of the
 Linux set, and one node in a cross-platform dotfiles system. The shared **Core**
 (zsh, tmux, Neovim, git, starship, mise) is authored once in
@@ -373,6 +375,7 @@ Project Link: [dotgibson](https://github.com/dotgibson/)
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- Markdown Links & Images -->
+[product-screenshot]: assets/demo.gif
 [repo-docs]: https://dotgibson.github.io/dotfiles-web/docs/repos/dotfiles-Gentoo
 [porting]: https://dotgibson.github.io/dotfiles-web/docs/reference/porting-matrix
 [c425]: https://github.com/dotgibson/dotfiles-core/issues/425
