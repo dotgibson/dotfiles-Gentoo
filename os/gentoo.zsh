@@ -22,23 +22,6 @@ fi
 command -v clip       >/dev/null && alias pbcopy='clip'
 command -v clip-paste >/dev/null && alias pbpaste='clip-paste'
 
-# ── tool completions / shell hooks (parity with other os layers) ─────────────
-# direnv/gh emit DETERMINISTIC scripts (the generated hook/completion TEXT is static for a
-# given binary; only the runtime hooks vary per-dir/-shell), so route them through Core's
-# _cache_eval (00-tools.zsh) — one cheap `source` of a cached file instead of forking each
-# generator on EVERY interactive shell. _cache_eval self-guards on the binary being present
-# and regenerates only when it's newer than the cache. Falls back to the eager eval if
-# this OS layer is sourced without Core's 00-tools.zsh — the fallback
-# keeps direnv's stderr visible, while the cached path suppresses the generator's
-# stderr (as _cache_eval does); direnv's per-dir runtime warnings are unaffected.
-if (( $+functions[_cache_eval] )); then
-  _cache_eval direnv direnv hook zsh
-  _cache_eval gh gh completion -s zsh
-else
-  command -v direnv >/dev/null 2>&1 && eval "$(direnv hook zsh)"
-  command -v gh >/dev/null 2>&1 && eval "$(gh completion -s zsh 2>/dev/null)"
-fi
-
 # ── conveniences ──────────────────────────────────────────────────────────────
 # Resolve the repo from THIS file rather than assuming a clone path. This layer is
 # reached as ~/.config/zsh/80-os.zsh, a symlink into the repo, so %N gives the path
