@@ -13,16 +13,6 @@
 [[ -d "$HOME/.local/bin" && ":$PATH:" != *":$HOME/.local/bin:"* ]] && export PATH="$HOME/.local/bin${PATH:+:$PATH}"
 [[ -d "$HOME/.cargo/bin" && ":$PATH:" != *":$HOME/.cargo/bin:"* ]] && export PATH="$HOME/.cargo/bin${PATH:+:$PATH}"
 
-_IS_WSL=0
-if [[ -n "${WSL_DISTRO_NAME:-}" ]]; then
-  _IS_WSL=1
-elif [[ -r /proc/version ]]; then
-  # zsh reads the file directly (no grep/cat fork) — WSL kernels tag /proc/version.
-  _pv="$(</proc/version)"; _pv=${_pv:l}
-  [[ "$_pv" == *microsoft* || "$_pv" == *wsl* ]] && _IS_WSL=1
-  unset _pv
-fi
-
 # doas safety shim if someone built without sudo
 if ! command -v sudo >/dev/null 2>&1 && command -v doas >/dev/null 2>&1; then
   alias sudo='doas'
@@ -67,7 +57,9 @@ command -v op >/dev/null 2>&1 && alias opsignin='eval "$(op signin)"'
 alias localip='ip -brief -4 addr show scope global'
 
 # ── WSL-only niceties ─────────────────────────────────────────────────────────
-if (( _IS_WSL )); then
+# The predicate is Core's (core/zsh/00-tools.zsh :: _core_is_wsl): fork-free, memoised,
+# and kept callable at band 80 for exactly this. This layer used to re-derive it.
+if _core_is_wsl; then
   alias open='explorer.exe'
   command -v wslview >/dev/null && alias xdg-open='wslview'
   [[ -n "${WINHOME:-}" ]] && alias cdwin='cd "$WINHOME"'
@@ -91,8 +83,6 @@ alias emconf='sudo dispatch-conf'                   # merge pending /etc config 
 alias gnews='sudo eselect news read'                # Portage news (READ these)
 # eix = fast indexed search (app-portage/eix). `eix-sync` syncs + updates index.
 command -v eix >/dev/null 2>&1 && alias emsearch='eix'
-
-unset _IS_WSL
 
 # ── auto-start/attach tmux for interactive terminals ─────────────────────────
 # This is a POLICY choice, not a Gentoo fact — it belongs to whoever owns the
