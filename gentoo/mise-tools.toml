@@ -9,12 +9,13 @@
 # GitHub-attestation-verified) into ~/.local/share/mise, so every tool here lands
 # in $HOME with no privileges and no compiler.
 #
-# WHY conf.d AND NOT `mise use -g`: ~/.config/mise/config.toml is a SYMLINK into
-# the vendored core/ subtree (core/mise/config.toml). mise's own documented way to
-# add a global tool — `mise use -g <tool>` — writes to that path, so the normal
-# user gesture would silently edit vendored Core and dirty the subtree. mise merges
-# every conf.d/*.toml alongside the global config, so this adds tools without
-# touching the file Core owns.
+# WHY conf.d AND NOT config.toml: ~/.config/mise/config.toml is Core's seed ADOPTED as
+# a real, user-owned copy (core/lib/bootstrap-lib.sh :: blib_adopt) so that mise's own
+# documented gesture, `mise use -g <tool>`, has somewhere safe to write — it was once a
+# symlink into core/, and `mise use -g` then edited vendored Core. Re-installing THIS
+# manifest into that file on every bootstrap would clobber the user's pins; mise merges
+# every conf.d/*.toml alongside the global config, so a file this repo owns outright
+# adds tools without touching the one the user owns.
 #
 # Scope: CLI tools only. Core's own config.toml keeps owning the language runtimes
 # (node/python/go/rust/…) — this file is strictly what `emerge` would otherwise
@@ -68,6 +69,7 @@ shfmt = "latest"
 hyperfine = "latest"
 watchexec = "latest"
 uv = "latest"
+ty = "latest"            # Astral's Python type checker; Core caches its completion beside uv's
 jj = "latest"
 difftastic = "latest"    # provides `difft`
 # ── editor + multiplexer + treesitter ────────────────────────────────────────
