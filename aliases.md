@@ -43,4 +43,4 @@ privilege-escalation muscle memory works without changes. Package names are full
 | `localip`  | `ip -brief -4 addr show scope global`                                | always                                                                   |
 | `open`     | `explorer.exe`                                                       | WSL                                                                      |
 | `xdg-open` | `wslview`                                                            | WSL + wslview                                                            |
-| `cdwin`    | `cd "$WINHOME"`                                                      | WSL + WINHOME set                                                        |
+| `cdwin`    | `cd` to the Windows profile (resolved + cached on first use)         | WSL                                                                      |

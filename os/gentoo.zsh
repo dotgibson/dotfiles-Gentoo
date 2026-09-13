@@ -45,7 +45,54 @@ alias localip='ip -brief -4 addr show scope global'
 if _core_is_wsl; then
   alias open='explorer.exe'
   command -v wslview >/dev/null && alias xdg-open='wslview'
-  [[ -n "${WINHOME:-}" ]] && alias cdwin='cd "$WINHOME"'
+
+  # cdwin — jump to the Windows user profile. A FUNCTION, not an alias gated on $WINHOME:
+  # nothing in Core or this layer ever exported WINHOME, so the old alias existed only on a
+  # box whose owner had set it by hand in 99-local.zsh — i.e. effectively never.
+  #
+  # Resolved LAZILY, on first use, never at startup: the only authoritative source is a
+  # Windows process (cmd.exe ~200 ms, powershell.exe ~600 ms, measured), which is the whole
+  # interactive-shell startup budget several times over, for a path most shells never take.
+  # And MEMOISED TO A FILE beside Core's other caches, so the fork is paid once per box, not
+  # once per shell as a plain variable memo would. The cached path is re-validated with -d on
+  # every read and re-probed if it is gone, so a moved profile self-heals.
+  #
+  # Resolution order — cheapest first:
+  #   $WINHOME      — already exported (by a previous call, or by hand); trusted if it exists
+  #   $USERPROFILE  — free: `WSLENV=USERPROFILE/up` on the Windows side hands it over,
+  #                   already translated to a /mnt path
+  #   the cache     — one file read
+  #   cmd.exe       — the probe; run from /mnt/c, because cmd.exe started in a Linux cwd
+  #                   warns "UNC paths are not supported" and falls back to C:\Windows
+  #   /mnt/c/Users/$USER — last resort; right on the common setup, wrong quietly otherwise
+  cdwin() {
+    if [[ ! -d ${WINHOME:-} ]]; then
+      local cache="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/winhome" up=""
+      if [[ -d ${USERPROFILE:-} ]]; then
+        up=$USERPROFILE
+      elif [[ -s $cache ]]; then
+        up="$(<"$cache")"
+      fi
+      if [[ ! -d $up ]] && (( $+commands[cmd.exe] && $+commands[wslpath] )); then
+        up="$(cd /mnt/c 2>/dev/null && cmd.exe /d /c 'echo %USERPROFILE%' 2>/dev/null)"
+        up=${up%%$'\r'*}
+        [[ -n $up ]] && up="$(wslpath -u "$up" 2>/dev/null)"
+        if [[ -d $up ]]; then
+          # `>|`: 10-options.zsh sets NO_CLOBBER, under which a plain `>` onto an existing
+          # file is a redirection error. Failure to cache is not failure to cd.
+          [[ -d ${cache:h} ]] || mkdir -p "${cache:h}" 2>/dev/null
+          print -r -- "$up" >| "$cache" 2>/dev/null
+        fi
+      fi
+      [[ -d $up ]] || up="/mnt/c/Users/$USER"
+      if [[ ! -d $up ]]; then
+        print -u2 "cdwin: could not resolve the Windows profile (tried \$WINHOME, \$USERPROFILE, $cache, cmd.exe, /mnt/c/Users/$USER)"
+        return 1
+      fi
+      export WINHOME=$up
+    fi
+    cd "$WINHOME"
+  }
 fi
 
 # ── Gentoo ships fd as `fd` — 00-tools.zsh already resolved this. ───────────────
