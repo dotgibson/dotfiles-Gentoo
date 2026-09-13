@@ -192,9 +192,12 @@ It reaches the same place: **41/41 tools and all five integrations wired** in
 `core doctor`, measured on a stable-profile Gentoo box with no `sudo` at all.
 
 Two notes worth knowing. The tool manifest is installed to
-`~/.config/mise/conf.d/`, **never** to `~/.config/mise/config.toml` — that path is
-a symlink into vendored `core/`, so `mise use -g` (mise's own documented gesture)
-would silently edit Core. And `--user` writes a `~/.zshenv` putting mise's shims
+`~/.config/mise/conf.d/`, not to `~/.config/mise/config.toml` — that file is Core's
+seed adopted as a real, user-owned copy, so that `mise use -g` (mise's own documented
+gesture) has somewhere safe to write; it was once a symlink into vendored `core/`, and
+a global `mise use -g` then edited Core. Re-installing this repo's manifest into it
+would clobber those pins, so the manifest lives in a `conf.d` file this repo owns
+outright. And `--user` writes a `~/.zshenv` putting mise's shims
 on `$PATH` before Core loads: without it Core's probes run before `mise activate`
 and every `HAVE_*` stays unset, so `core doctor` reports ✓ for tools the shell is
 not actually using ([dotfiles-core#425][c425]).
