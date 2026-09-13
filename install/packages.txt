@@ -62,7 +62,9 @@ app-misc/yq-go          # bin:yq — mikefarah's GO yq (NOT app-misc/yq, which i
 #   net-analyzer/gping
 # Provided by mise (gentoo/mise-tools.toml), NOT emerged:
 #   gum
-#   Do NOT add app-misc/gum back: no such ebuild exists in ::gentoo OR in GURU,
+#   Do NOT add app-misc/gum back: no such ebuild exists in ::gentoo OR in GURU
+#   (the only packaged form is dev-util/gum in the jaredallard overlay, which
+#   this repo does not enable — same shape as shfmt below),
 #   so it can only ever emerge as a `skipped:` line — which reads like a keyword
 #   mask and gets "fixed" with an accept_keywords entry that unmasks nothing.
 #   That is exactly how it survived in the guru_install list; mise owns gum.
@@ -90,12 +92,12 @@ app-misc/yq-go          # bin:yq — mikefarah's GO yq (NOT app-misc/yq, which i
 #   -stdlib=libc++. gentoo/mise-tools.toml has documented that cause since user
 #   mode was written; the privileged path just never read its own note, and every
 #   sweep logged a bare "cargo build failed" (issue #133).
-#   GURU's app-arch/ouch is 0.8.1, ONE patch release behind upstream's 0.8.2
-#   (2026-08-31) — so the route-around bought no meaningful version advantage and
-#   cost the build — and its src_prepare() seds that exact flag out. So: Portage
-#   owns the upgrade, the binary lands in /usr/bin, a binhost can supply it, and
-#   it actually builds. Same reasoning that moved dev-vcs/jj off
-#   `cargo install jj-cli`, one tree over.
+#   GURU's app-arch/ouch is 0.8.2, level with upstream's 0.8.2 (2026-08-31;
+#   re-checked 2026-09-13, issue #180) — so the route-around bought NO version
+#   advantage at all and cost the build — and its src_prepare() seds that exact
+#   flag out. So: Portage owns the upgrade, the binary lands in /usr/bin, a
+#   binhost can supply it, and it actually builds. Same reasoning that moved
+#   dev-vcs/jj off `cargo install jj-cli`, one tree over.
 #   It is opt-in, so it is NOT in the unconditional guru_install list and NOT in
 #   this file — bootstrap.sh has a `guru_extras_install` seam for the one pairing
 #   neither existing list covers (overlay-sourced AND skipped by --no-extras).

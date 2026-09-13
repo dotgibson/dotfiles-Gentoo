@@ -1224,8 +1224,8 @@ provision() {
     # burned a compile and logged "cargo build failed" (issue #133).
     #
     # And the rationale it was kept under does not survive contact either: GURU's
-    # ebuild is 0.8.1, the SAME version as upstream's latest release, so "cargo for
-    # upstream-latest" bought no version and cost the tool. Its src_prepare() seds
+    # ebuild is 0.8.2, level with upstream's latest release (2026-08-31), so "cargo
+    # for upstream-latest" bought no version and cost the tool. Its src_prepare() seds
     # that exact flag out. Same move dev-vcs/jj made, one tree over.
     guru_extras_install app-arch/ouch
     _dotfiles_cargo_install ast-grep ast-grep
