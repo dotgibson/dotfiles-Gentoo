@@ -922,10 +922,14 @@ _user_build_zsh() {
   return 0
 }
 
-# The mise tool manifest goes to conf.d, NEVER to ~/.config/mise/config.toml —
-# that path is a symlink into the vendored core/ subtree, so writing it (which is
-# exactly what `mise use -g` does) would silently edit Core. Same install rules as
-# the /etc/portage files: idempotent, backed up, previewable.
+# The mise tool manifest goes to conf.d, not to ~/.config/mise/config.toml. That file
+# is Core's seed ADOPTED as a real, user-owned copy (core/lib/bootstrap-lib.sh ::
+# blib_adopt), precisely so `mise use -g` has somewhere safe to write: it used to be a
+# symlink into core/, and a global `mise use -g` then wrote straight through into the
+# vendored tree. Re-installing this repo's manifest into it on every bootstrap would
+# clobber those user pins, whereas a conf.d file this repo owns outright is idempotent
+# to reinstall. Same install rules as the /etc/portage files: idempotent, backed up,
+# previewable.
 _user_install_mise_tools() {
   local src="$DOTFILES/gentoo/mise-tools.toml"
   local dir="${XDG_CONFIG_HOME:-$HOME/.config}/mise/conf.d"
