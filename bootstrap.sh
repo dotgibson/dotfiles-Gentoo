@@ -381,7 +381,7 @@ _guru_enable() {
   ((_GURU_ENABLE_TRIED)) && return 0
   _GURU_ENABLE_TRIED=1
   _guru_available && return 0
-  blib_say "enabling the GURU overlay (for sd/glow/xh/carapace/op/ouch)"
+  blib_say "enabling the GURU overlay (it carries the atoms ::gentoo doesn't — named at the emerge that follows; + ouch under --extras)"
   local log
   log="$(_log_path guru-enable)"
   if blib_priv eselect repository enable guru >"${log:-/dev/null}" 2>&1 &&
