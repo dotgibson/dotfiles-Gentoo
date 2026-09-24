@@ -131,17 +131,10 @@ app-editors/neovim      # bin:nvim min:0.12.0 — nvim-treesitter (main) hard-re
                         #   gentoo/package.accept_keywords a stable profile emerges
                         #   0.11.7 and Core's nvim config will not load
 dev-util/tree-sitter-cli  # bin:tree-sitter min:0.26.1 — backs nvim-treesitter.
-                        #   ::gentoo has 0.26.11 STABLE on amd64, which clears the
+                        #   ::gentoo has 0.26.12 STABLE on amd64, which clears the
                         #   floor, so this needs no keyword line — and no cargo
                         #   build either: bootstrap.sh used to compile the crate on
                         #   every privileged run
-                        #   NB maintainer-needed as of 2026-08-30 — the same hedge
-                        #   as lnav and w3m below, since orphaning is what precedes
-                        #   a treeclean. Availability is unchanged: 0.26.11 is still
-                        #   stable and still clears the floor; it is the maintainer
-                        #   that went away. core/PORTING-MATRIX.md footnote 5 makes
-                        #   the same claim and wants the same hedge — fix it in
-                        #   dotfiles-core, not in the vendored copy here
 dev-vcs/git             # `git subtree` ships with git on Gentoo
 net-misc/openssh        # bin:ssh — client + server (Gentoo ships one package)
 dev-vcs/git-absorb      # `git absorb` — auto-route staged hunks into earlier commits
