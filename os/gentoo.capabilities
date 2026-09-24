@@ -41,6 +41,15 @@ PKG_OWNS=equery belongs
 PKG_COUNT_PENDING=gentoo-pkg-pending
 # It prints one atom per line, so the default match (`.`) and field (1) are right.
 
+# ── what --packages must not nag about (#1087) ────────────────────────────────
+# THREE DIFFERENT REASONS, which is why this is a declaration and not a list in Core.
+# `emerge` is Portage itself — base-system, so packages.txt does not name it.
+# `equery` IS installed, under another name: `app-portage/gentoolkit` provides it, and
+# packages.txt already annotates that line `# bin:equery`. And `gentoo-pkg-pending` is
+# shipped by THIS repo — bootstrap.sh symlinks scripts/pkg-pending.sh onto PATH as that
+# name, so no package anywhere installs it.
+PKG_UNLISTED_TOOLS=emerge equery gentoo-pkg-pending
+
 # ── scheduler (required) ──────────────────────────────────────────────────────
 # OpenRC, not systemd: this box has `crontab` and no systemctl. Core's 55-maint.zsh
 # has had a live cron arm all along; `cron` became expressible in the schema in #665.

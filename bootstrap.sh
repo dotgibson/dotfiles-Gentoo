@@ -7,49 +7,75 @@
 # mitigations are wired in — the official binhost (--getbinpkg, auto-detected)
 # and dev-lang/rust-bin (in packages.txt) instead of compiling Rust from source.
 #
-# The SHARED half of this script lives in core/lib/bootstrap-lib.sh and is called,
-# not re-implemented: privilege resolution (blib_resolve_su), the sudo-timestamp
-# keepalive, the user-bindir PATH fix, deferred-failure accounting, the symlink
-# surface, and the core/ pre-commit guard. Anything hand-rolled here that Core
-# already solves is drift — see that file's header for the contract.
+# THE DRIVER FORM (dotgibson/dotfiles-core#976, #986). The shared half of a bootstrap —
+# the flags, the Core symlink surface, the OS overlays, the managed ~/.zshrc loader, the
+# closing report — is core/lib/bootstrap-lib.sh :: blib_main, ONE definition instead of a
+# copy per repo. Gentoo declares BOOTSTRAP_SU=lazy and owns escalation itself, because it
+# has a fallback nobody else has: no escalator, or a sudo that will not authenticate, means
+# --user mode (everything into $HOME, no emerge) rather than an abort. The hooks below are
+# what is genuinely Gentoo's: the OS guard with that fallback, the emerge / user-mode
+# provisioning (bodies unchanged), the pkg-pending link, the repo flags.
 # ──────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 DOTFILES="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Read by blib_main in the sourced lib (shellcheck does not follow into it).
+# shellcheck disable=SC2034
 CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}"
-LINKS_ONLY=0
 DO_SYNC=1
-STRICT=0
-DRY=0
 PORTAGE_CONFIG=1
 EXTRAS=1
 USER_MODE=0
-# --only/--skip are validated by the shared lib (blib_select), which is sourced
-# AFTER this loop — so capture the raw values now and apply them below.
-ONLY_RAW="" SKIP_RAW="" ONLY_SEEN=0 SKIP_SEEN=0
+# Mirrors the driver's BLIB_DRY (set in bootstrap_guard, the first hook) for the
+# provisioning helpers below, whose dry-run branches read it.
+DRY=0
 
-# usage — a heredoc, not `sed -n '2,19p' "$0"`. The line-range form silently
-# truncated (or printed half a comment block) the moment anyone edited the header,
-# which is exactly the kind of coupling a header comment invites.
-usage() {
+# ── core/ subtree present? (inline: can't source a lib out of core/ before this) ─
+# Validate the SPECIFIC paths we depend on (zsh modules + the two libs sourced
+# next) so a missing/partial subtree fails HERE with a precise message, not later
+# with a cryptic `source: No such file`.
+for _req in core/zsh/loader.zsh core/lib/ux.sh core/lib/bootstrap-lib.sh; do
+  if [[ ! -e "$DOTFILES/$_req" ]]; then
+    echo "vendored core/ missing or incomplete (need $_req). To populate it:" >&2
+    echo "  make sync          # in dotfiles-core — the fan-out that also stamps core.lock" >&2
+    echo "If core/ does not exist AT ALL the fan-out skips this repo; do the one-time" >&2
+    echo "vendor first, from a RELEASED TAG (never main, or core-integrity reports the" >&2
+    echo "fresh tree as TAMPERED), then sync:" >&2
+    echo "  git subtree add --prefix=core <dotfiles-core remote> refs/tags/v7 --squash" >&2
+    exit 1
+  fi
+done
+unset _req
+
+# Shared bash UX palette + provisioning scaffold (vendored under core/lib).
+# shellcheck source=core/lib/ux.sh
+source "$DOTFILES/core/lib/ux.sh"
+# shellcheck source=core/lib/bootstrap-lib.sh
+source "$DOTFILES/core/lib/bootstrap-lib.sh"
+
+# ── what this repo is (read by blib_main) ─────────────────────────────────────
+# shellcheck disable=SC2034
+BOOTSTRAP_NAME="Gentoo"
+# shellcheck disable=SC2034
+BOOTSTRAP_OS=gentoo # → blib_link_os_layer: os/gentoo.{zsh,conf,gitconfig,capabilities}
+# lazy: the driver resolves no escalator and primes no keepalive — bootstrap_guard and
+# bootstrap_provision do both, each with the fallback to --user mode described there.
+# shellcheck disable=SC2034
+BOOTSTRAP_SU=lazy
+# Flipped to 0 by the hooks when the run ends up in user mode: chsh needs /etc/shells,
+# which is root-only, and _user_login_handoff covers the same ground without privileges.
+BOOTSTRAP_LOGIN_SHELL=1
+
+# ── hooks (called by blib_main, in its order; shellcheck cannot see that) ─────
+# shellcheck disable=SC2329
+bootstrap_usage() {
   cat <<'USAGE'
 Provision a Gentoo box and wire the dotfiles. Idempotent — safe to re-run.
 
-Usage:
-  ./bootstrap.sh                 # sync + emerge atoms + extras + symlinks
-  ./bootstrap.sh --no-sync       # skip the (slow) `emerge --sync`
-  ./bootstrap.sh --links-only    # just (re)create symlinks (needs no privileges)
-  ./bootstrap.sh --dry-run       # print the full plan, change nothing
-  ./bootstrap.sh --strict        # exit non-zero if any best-effort step failed
-  ./bootstrap.sh --no-portage-config  # do NOT touch /etc/portage
-  ./bootstrap.sh --no-extras     # skip the opt-in source builds (see below)
-  ./bootstrap.sh --user          # install everything into $HOME, no privileges
-  ./bootstrap.sh --only zsh,nvim # link ONLY these Core module groups
-  ./bootstrap.sh --skip tmux     # link everything EXCEPT these groups
-
-Module groups (for --only/--skip): zsh nvim tmux git prompt tools
-They affect the wiring steps only, never package provisioning; combine with
---links-only to re-wire a subset of configs without touching Portage.
+  --no-sync             skip the (slow) `emerge --sync`
+  --no-portage-config   do NOT touch /etc/portage
+  --no-extras           skip the opt-in source builds (see below)
+  --user                install everything into $HOME, no privileges
 
 Gentoo notes:
   • emerge COMPILES. Enable the binhost (auto-detected here) and keep
@@ -97,193 +123,70 @@ best-effort tools separately (warn). Run that after a bootstrap. Use --strict wh
 you want the run itself to carry the exit code.
 USAGE
 }
-
-while [[ $# -gt 0 ]]; do case "$1" in
-  --links-only) LINKS_ONLY=1 ;;
+# shellcheck disable=SC2329
+bootstrap_flag() {
+  case "$1" in
   --no-sync) DO_SYNC=0 ;;
-  --dry-run) DRY=1 ;;
-  --strict) STRICT=1 ;;
   --no-portage-config) PORTAGE_CONFIG=0 ;;
   --no-extras) EXTRAS=0 ;;
   --user) USER_MODE=1 ;;
-  --only) [[ $# -ge 2 ]] || {
-    echo "--only requires module names, e.g. --only zsh,nvim" >&2
-    exit 1
-  }; ONLY_RAW="$2"; ONLY_SEEN=1; shift ;;
-  --only=*) ONLY_RAW="${1#*=}"; ONLY_SEEN=1 ;;
-  --skip) [[ $# -ge 2 ]] || {
-    echo "--skip requires module names, e.g. --skip tmux" >&2
-    exit 1
-  }; SKIP_RAW="$2"; SKIP_SEEN=1; shift ;;
-  --skip=*) SKIP_RAW="${1#*=}"; SKIP_SEEN=1 ;;
-  -h | --help)
-    usage
-    exit 0
-    ;;
-  *)
-    echo "unknown arg: $1" >&2
-    usage >&2
-    exit 1
-    ;;
-  esac; shift; done
+  *) return 1 ;;
+  esac
+  return 0
+}
 
-# ── core/ subtree present? (inline: can't source a lib out of core/ before this) ─
-# Validate the SPECIFIC paths we depend on (zsh modules + the two libs sourced
-# next) so a missing/partial subtree fails HERE with a precise message, not later
-# with a cryptic `source: No such file`.
-for _req in core/zsh/loader.zsh core/lib/ux.sh core/lib/bootstrap-lib.sh; do
-  if [[ ! -e "$DOTFILES/$_req" ]]; then
-    echo "vendored core/ missing or incomplete (need $_req). To populate it:" >&2
-    echo "  make sync          # in dotfiles-core — the fan-out that also stamps core.lock" >&2
-    echo "If core/ does not exist AT ALL the fan-out skips this repo; do the one-time" >&2
-    echo "vendor first, from a RELEASED TAG (never main, or core-integrity reports the" >&2
-    echo "fresh tree as TAMPERED), then sync:" >&2
-    echo "  git subtree add --prefix=core <dotfiles-core remote> refs/tags/v7 --squash" >&2
+# ── the OS guard, then the escalator with Gentoo's fallback ───────────────────
+# Read ID out of os-release, tolerating the QUOTING the format permits. Real
+# Gentoo ships the value quoted (ID='gentoo'), so a bare `grep -qiE '^ID=gentoo'`
+# matched nothing and this script refused to run on the one OS it targets. Sourcing
+# the file is the conventional read and is deliberately NOT used: one scalar field,
+# whose value is a lowercase identifier, needs no execution surface.
+os_guard() {
+  local _os_id=""
+  if [[ -r /etc/os-release ]]; then
+    _os_id="$(sed -n 's/^ID=//p' /etc/os-release 2>/dev/null | head -n1)"
+    _os_id="${_os_id%\"}"; _os_id="${_os_id#\"}"   # ID="gentoo"
+    _os_id="${_os_id%\'}"; _os_id="${_os_id#\'}"   # ID='gentoo'
+  fi
+  _os_id="$(printf '%s' "$_os_id" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$_os_id" != gentoo ]]; then
+    echo "This bootstrap targets Gentoo (expects ID=gentoo in /etc/os-release; found '${_os_id:-<none>}')." >&2
     exit 1
   fi
-done
-unset _req
-
-# Shared bash UX palette + provisioning scaffold (vendored under core/lib).
-# BLIB_DRY is the lib's own dry-run switch: every mutating helper (blib_link,
-# blib_seed, blib_write_zshrc_loader, blib_set_login_shell, …) then PRINTS what it
-# would do and changes nothing. Export before sourcing so it is in effect from the
-# first helper call.
-((DRY)) && export BLIB_DRY=1
-# shellcheck source=core/lib/ux.sh
-source "$DOTFILES/core/lib/ux.sh"
-# shellcheck source=core/lib/bootstrap-lib.sh
-source "$DOTFILES/core/lib/bootstrap-lib.sh"
-
-# Apply any --only/--skip module selection now the validator (blib_select) exists;
-# it aborts on a malformed selector or an unknown group.
-if ((ONLY_SEEN)); then blib_select --only "$ONLY_RAW"; fi
-if ((SKIP_SEEN)); then blib_select --skip "$SKIP_RAW"; fi
-
-# ── privilege tool ────────────────────────────────────────────────────────────
-# blib_resolve_su, NOT a hand-rolled probe. It pins the ABSOLUTE path of sudo/doas
-# (so a later PATH change or an exported `sudo()` function cannot redirect a
-# privileged call), and it decides "are we root" from $EUID rather than from
-# `[[ "$(id -u)" -eq 0 ]]` — an ARITHMETIC comparison in which an empty `id` output
-# evaluates as 0, i.e. a box with no `id` on PATH concludes it is root and runs the
-# whole provision unescalated. Both were live here before.
-#
-# --require only when we are actually going to install something: wiring symlinks
-# needs no privileges at all, so a links-only or dry run on an unprivileged box
-# must still work.
-if ((LINKS_ONLY)) || ((DRY)) || ((USER_MODE)); then
-  blib_resolve_su || true
-elif ! blib_resolve_su --require; then
-  # No escalator, and packages were asked for. Aborting here is the wrong answer:
-  # it is exactly the box --user exists for, and the operator cannot fix it by
-  # re-running with a password they do not have. Fall back, loudly.
-  blib_warn "no way to escalate — falling back to --user (everything into \$HOME, no emerge)"
-  USER_MODE=1
-fi
-# INVARIANT: user mode never escalates. Forcing BLIB_SU empty makes that true by
-# construction rather than by every call site remembering — blib_priv then runs
-# commands directly, and anything genuinely needing root fails as this user
-# instead of sitting on a sudo prompt.
-((USER_MODE)) && export BLIB_SU=""
-
-# ── PATH: the per-user bindirs language installers write into ─────────────────
-# cargo writes $CARGO_HOME/bin and go writes $GOBIN; neither is on a fresh box's
-# bash PATH (they reach PATH via the OS zsh layer — i.e. only inside a Core shell
-# that does not exist yet). Without this every `command -v <tool>` guard below
-# answers "missing" for a tool that IS installed, and each re-run recompiles viddy
-# from source: minutes of work, silently discarded. (It used to recompile
-# tree-sitter-cli too, until ::gentoo packaged it and this script stopped building
-# it — one fewer source build the guard has to protect, not one fewer reason for it.)
-blib_user_bindirs_on_path
-
-# ── sanity: confirm we're on Gentoo ───────────────────────────────────────────
-# Read ID out of os-release, tolerating the QUOTING the format permits. Real
-# Gentoo ships the value quoted —
-#
-#   $ grep ^ID= /etc/os-release
-#   ID='gentoo'
-#
-# — so the previous `grep -qiE '^ID=gentoo'` matched nothing, and this script
-# refused to run on the one OS it targets.
-#
-# os-release(5) says the file may be sourced, and `. /etc/os-release` is the
-# conventional read. It is deliberately NOT used here: sourcing executes the file,
-# which is an execution surface this needs nothing from — one scalar field, whose
-# value is a lowercase identifier. Stripping one optional layer of matching quotes
-# is the whole job, so do that and keep the parser inert.
-#
-# CI never caught the original bug because bootstrap.yml's prep step appends an
-# UNQUOTED `ID=gentoo` to the container's os-release, manufacturing the one form
-# the old grep accepted — the gate was green while the script could not start on a
-# real box. Fixing that fixture is a one-line prep change in a follow-up PR (the
-# push token here has no `workflow` scope); until it lands, CI still exercises only
-# the bare spelling, and THIS box is the coverage for the quoted one.
-_os_id=""
-if [[ -r /etc/os-release ]]; then
-  _os_id="$(sed -n 's/^ID=//p' /etc/os-release 2>/dev/null | head -n1)"
-  _os_id="${_os_id%\"}"; _os_id="${_os_id#\"}"   # ID="gentoo"
-  _os_id="${_os_id%\'}"; _os_id="${_os_id#\'}"   # ID='gentoo'
-fi
-_os_id="$(printf '%s' "$_os_id" | tr '[:upper:]' '[:lower:]')"
-if [[ "$_os_id" != gentoo ]]; then
-  echo "This bootstrap targets Gentoo (expects ID=gentoo in /etc/os-release; found '${_os_id:-<none>}')." >&2
-  exit 1
-fi
-unset _os_id
+}
+# shellcheck disable=SC2329
+bootstrap_guard() {
+  DRY="${BLIB_DRY:-0}"
+  os_guard
+  # blib_resolve_su pins the ABSOLUTE path of sudo/doas and decides "root" from $EUID.
+  # --require only when we are actually going to install something. No escalator when
+  # packages were asked for is NOT an abort here: it is exactly the box --user exists
+  # for, and the operator cannot fix it by re-running with a password they do not have.
+  if ((BLIB_LINKS_ONLY)) || ((DRY)) || ((USER_MODE)); then
+    blib_resolve_su || true
+  elif ! blib_resolve_su --require; then
+    # No escalator, and packages were asked for. Aborting here is the wrong answer:
+    # it is exactly the box --user exists for, and the operator cannot fix it by
+    # re-running with a password they do not have. Fall back, loudly.
+    blib_warn "no way to escalate — falling back to --user (everything into \$HOME, no emerge)"
+    USER_MODE=1
+  fi
+  # INVARIANT: user mode never escalates. Forcing BLIB_SU empty makes that true by
+  # construction rather than by every call site remembering — blib_priv then runs
+  # commands directly, and anything genuinely needing root fails as this user
+  # instead of sitting on a sudo prompt.
+  # INVARIANT: user mode never escalates, and never touches the login shell. Forcing
+  # BLIB_SU empty makes the first true by construction — blib_priv then runs commands
+  # directly, and anything genuinely needing root fails as this user instead of
+  # sitting on a sudo prompt.
+  if ((USER_MODE)); then
+    export BLIB_SU=""
+    BOOTSTRAP_LOGIN_SHELL=0
+  fi
+}
 
 IS_WSL=0
 if blib_is_wsl; then IS_WSL=1; fi
-
-# ── keep the sudo timestamp warm for the whole run ────────────────────────────
-# Gentoo is the worst case for this: a single `emerge` can run for HOURS, so sudo's
-# 5-minute timestamp is long expired by the time the GURU block runs — and those
-# calls redirect stderr, which is where sudo writes its prompt. The result is a
-# process waiting on a TTY read with nothing on screen: no output, no progress,
-# indistinguishable from a hang. Prime it once up front (visibly, at the start) and
-# refresh it in the background until we exit.
-if ((LINKS_ONLY == 0)) && ((DRY == 0)) && ((USER_MODE == 0)); then
-  trap 'blib_sudo_keepalive_stop' EXIT
-  # A FAILED priming is not a reason to abort — it is a reason to fall back.
-  #
-  # blib_resolve_su answers "is there an escalator BINARY", which is a different
-  # question from "can this account actually use it". The gap between those two is
-  # the common case, not the exotic one: a corporate laptop or shared host where
-  # /usr/bin/sudo exists and the account is simply not in sudoers. There, resolve
-  # succeeds, and this priming is the first step that learns the truth:
-  #
-  #   gerrrt is not in the sudoers file.  This incident will be reported.
-  #   ! sudo authentication failed — aborting before provisioning anything
-  #   EXIT=1
-  #
-  # Three different situations reach this branch, and they are NOT equally
-  # recoverable — which is why the message below names all of them rather than
-  # assuming the first:
-  #
-  #   not in sudoers   irrecoverable here. No password would work, so aborting is
-  #                    the same mistake --user was added to fix, one layer in: the
-  #                    operator cannot resolve it by re-running.
-  #   wrong password   recoverable — re-run and type it correctly.
-  #   no TTY to        recoverable — re-run from a terminal. Common in automation,
-  #   prompt on        and the one most likely to surprise someone with full sudo.
-  #
-  # Falling back suits all three: the recoverable two get a working $HOME install
-  # now and a system-wide one whenever they re-run, instead of exit 1 and nothing.
-  # But a message that only mentions sudoers would send the other two hunting for a
-  # permissions problem they do not have.
-  #
-  # NB doas: blib_sudo_keepalive_start returns success without priming for anything
-  # that is not sudo (doas has no refreshable timestamp), so an unpermitted doas is
-  # not caught here — it surfaces per-atom through emerge_install's failure tally
-  # instead. Distinguishing "doas needs a password" from "doas will never allow
-  # this" is not something `doas -n` can answer, so guessing would break the
-  # legitimate password prompt for everyone else.
-  if ! blib_sudo_keepalive_start; then
-    blib_warn "could not authenticate with ${BLIB_SU:-the privilege escalator} — falling back to --user (everything into \$HOME, no emerge)"
-    blib_warn "to provision system-wide instead, re-run from a terminal with a correct password — or, if this account is genuinely not in sudoers, add it (the wheel group) first"
-    USER_MODE=1
-    export BLIB_SU=""
-  fi
-fi
 
 # ── emerge options: quiet builds, skip already-installed (idempotent re-runs),
 # and pull binary packages IF a binhost is configured (huge time-saver). ────────
@@ -478,7 +381,7 @@ _guru_enable() {
   ((_GURU_ENABLE_TRIED)) && return 0
   _GURU_ENABLE_TRIED=1
   _guru_available && return 0
-  blib_say "enabling the GURU overlay (for sd/glow/xh/carapace/op/ouch)"
+  blib_say "enabling the GURU overlay (it carries the atoms ::gentoo doesn't — named at the emerge that follows; + ouch under --extras)"
   local log
   log="$(_log_path guru-enable)"
   if blib_priv eselect repository enable guru >"${log:-/dev/null}" 2>&1 &&
@@ -1244,73 +1147,90 @@ provision() {
   return 0
 }
 
-wire_links() {
-  # The shared symlink surface + the Gentoo OS overlays + the managed .zshrc
-  # loader + the default-login-shell switch all live in core/lib/bootstrap-lib.sh.
-  blib_link_core "$DOTFILES" "$CONFIG"
-  blib_link_os_layer "$DOTFILES" "$CONFIG" gentoo
-  # The pending-update counter os/gentoo.capabilities declares as PKG_COUNT_PENDING.
-  # It has to be reachable BY NAME: a declaration is data, so Core never expands a
-  # path out of it, and the maint runner is a different process with a baked PATH.
-  # ~/.local/bin is the one directory both callers already have — the interactive
-  # shell prepends it (os/gentoo.zsh) and it is the first entry in the runner's PATH
-  # (core/maint/dotfiles-maint.sh) — so the symlink is what makes the declaration
-  # true. blib_link honours BLIB_DRY, so --dry-run stays a preview.
-  blib_link "$DOTFILES/scripts/pkg-pending.sh" "$HOME/.local/bin/gentoo-pkg-pending"
-  # shellcheck disable=SC2119  # no args is intentional — writes the default module set
-  blib_write_zshrc_loader
-  # blib_set_login_shell runs `chsh -s <zsh>`, which needs the shell to be listed
-  # in /etc/shells — a root-only edit. In user mode that is guaranteed to fail, and
-  # it fails EXPENSIVELY: observed burning three sudo password attempts (with the
-  # lockout risk that carries) before warning. _user_login_handoff already covers
-  # the same ground with no privileges, so skip it outright.
-  if ((USER_MODE)); then
-    blib_say "user mode: not touching the login shell (chsh needs /etc/shells, which is root-only) — the ~/.bash_profile handoff does this instead"
-  else
-    blib_set_login_shell
-  fi
-  # The local half of the "never hand-edit core/" rule (VENDORING.md). Only
-  # sync-core.sh installed this before — i.e. only on the maintainer's machine
-  # during a fan-out — so every other clone had no guard at all. It is idempotent
-  # and never clobbers an unrelated pre-commit hook.
-  # Guarded on DRY by hand: blib_install_core_guard does not itself honour
-  # BLIB_DRY, and a dry run must not write into .git/hooks.
-  if ((DRY)); then
-    blib_say "would install the core/ pre-commit guard into .git/hooks"
-  else
-    blib_install_core_guard "$DOTFILES"
-  fi
-  blib_ok "symlinks wired$(blib_selected_note)"
+# A dry run must preview provisioning too: the driver never fakes bootstrap_provision,
+# and both provisioning functions carry their own dry-run branch, which prints the plan
+# and returns. This report-only hook (it runs unless --links-only) invokes that branch.
+# shellcheck disable=SC2329
+bootstrap_check() {
+  ((DRY)) || return 0
+  if ((USER_MODE)); then provision_user; else provision; fi
 }
 
-if ((LINKS_ONLY)); then
-  :
-elif ((USER_MODE)); then
-  provision_user
-else
-  provision
-fi
-wire_links
-blib_wire_summary
-
-# ── the honest ending ─────────────────────────────────────────────────────────
-# Every best-effort step that failed was recorded with blib_note_fail; print them
-# together here. Without this the script ended `blib_ok "complete"` / exit 0 even
-# when nothing optional had installed — a box that got none of its tooling was
-# indistinguishable from a good one, to the operator and to CI alike. (It also
-# dropped failures the shared lib itself recorded, e.g. a failed tpm clone.)
-_rc=0
-blib_failures_report || _rc=1
-if ((DRY)); then
-  blib_ok "dry run complete — nothing was changed"
-  exit 0
-fi
-if ((_rc)); then
-  if ((STRICT)); then
-    blib_warn "Gentoo bootstrap finished with failures (--strict) — see the list above"
-    exit 1
+# The keepalive, with Gentoo's fallback, then the route.
+# Gentoo is the worst case for the keepalive: a single `emerge` can run for HOURS, so
+# sudo's 5-minute timestamp is long expired by the time the GURU block runs — and those
+# calls redirect stderr, which is where sudo writes its prompt.
+# Gentoo is the worst case for this: a single `emerge` can run for HOURS, so sudo's
+# 5-minute timestamp is long expired by the time the GURU block runs — and those
+# calls redirect stderr, which is where sudo writes its prompt. The result is a
+# process waiting on a TTY read with nothing on screen: no output, no progress,
+# indistinguishable from a hang. Prime it once up front (visibly, at the start) and
+# refresh it in the background until we exit.
+# shellcheck disable=SC2329
+bootstrap_provision() {
+  if ((USER_MODE == 0)); then
+    trap 'blib_sudo_keepalive_stop' EXIT
+    # A FAILED priming is not a reason to abort — it is a reason to fall back.
+    #
+    # blib_resolve_su answers "is there an escalator BINARY", which is a different
+    # question from "can this account actually use it". The gap between those two is
+    # the common case, not the exotic one: a corporate laptop or shared host where
+    # /usr/bin/sudo exists and the account is simply not in sudoers. There, resolve
+    # succeeds, and this priming is the first step that learns the truth:
+    #
+    #   gerrrt is not in the sudoers file.  This incident will be reported.
+    #   ! sudo authentication failed — aborting before provisioning anything
+    #   EXIT=1
+    #
+    # Three different situations reach this branch, and they are NOT equally
+    # recoverable — which is why the message below names all of them rather than
+    # assuming the first:
+    #
+    #   not in sudoers   irrecoverable here. No password would work, so aborting is
+    #                    the same mistake --user was added to fix, one layer in: the
+    #                    operator cannot resolve it by re-running.
+    #   wrong password   recoverable — re-run and type it correctly.
+    #   no TTY to        recoverable — re-run from a terminal. Common in automation,
+    #   prompt on        and the one most likely to surprise someone with full sudo.
+    #
+    # Falling back suits all three: the recoverable two get a working $HOME install
+    # now and a system-wide one whenever they re-run, instead of exit 1 and nothing.
+    # But a message that only mentions sudoers would send the other two hunting for a
+    # permissions problem they do not have.
+    #
+    # NB doas: blib_sudo_keepalive_start returns success without priming for anything
+    # that is not sudo (doas has no refreshable timestamp), so an unpermitted doas is
+    # not caught here — it surfaces per-atom through emerge_install's failure tally
+    # instead. Distinguishing "doas needs a password" from "doas will never allow
+    # this" is not something `doas -n` can answer, so guessing would break the
+    # legitimate password prompt for everyone else.
+    if ! blib_sudo_keepalive_start; then
+      blib_warn "could not authenticate with ${BLIB_SU:-the privilege escalator} — falling back to --user (everything into \$HOME, no emerge)"
+      blib_warn "to provision system-wide instead, re-run from a terminal with a correct password — or, if this account is genuinely not in sudoers, add it (the wheel group) first"
+      USER_MODE=1
+      export BLIB_SU=""
+      BOOTSTRAP_LOGIN_SHELL=0
+    fi
   fi
-  blib_warn "Gentoo bootstrap finished, but the steps above did not complete — re-run with --strict to make this a non-zero exit"
-  exit 0
-fi
-blib_ok "Gentoo bootstrap complete — open a new shell or: exec zsh"
+  if ((USER_MODE)); then
+    provision_user
+  else
+    provision
+    blib_sudo_keepalive_stop
+  fi
+}
+
+# The pending-update counter os/gentoo.capabilities declares as PKG_COUNT_PENDING. It has
+# to be reachable BY NAME: a declaration is data, so Core never expands a path out of it,
+# and the maint runner is a different process with a baked PATH. ~/.local/bin is the one
+# directory both callers already have, so the symlink is what makes the declaration true.
+# blib_link honours BLIB_DRY, so --dry-run stays a preview.
+# shellcheck disable=SC2329
+bootstrap_wire_pre_loader() {
+  blib_link "$DOTFILES/scripts/pkg-pending.sh" "$HOME/.local/bin/gentoo-pkg-pending"
+  if ((USER_MODE)); then
+    blib_say "user mode: not touching the login shell (chsh needs /etc/shells, which is root-only) — the ~/.bash_profile handoff does this instead"
+  fi
+}
+
+blib_main "$@"

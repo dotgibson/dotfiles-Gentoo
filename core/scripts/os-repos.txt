@@ -3,7 +3,21 @@
 # ONE list of the repos Core fans out into (B9). Read by scripts/sync-core.sh as the
 # default TARGETS when no repos are named on the CLI.
 #
-# THIS FILE IS THE ONLY EDIT. Adding or removing a fleet target is one line, here.
+# THIS FILE IS THE ONLY EDIT IN GIT — AND IT IS NOT THE ONLY STEP. Every reader in every
+# repo goes through this one line, so nothing in a checkout needs a second edit.
+#
+# But the fan-out's CREDENTIAL is not in a checkout. `sync-fanout.yml` pushes with a token
+# minted from the `dotgibson-fleet-sync` GitHub App, and that App's installation carries its
+# own repository list: a target registered here but absent THERE cannot be pushed to, and
+# the 403 lands at the END of a release, after the other repos already have their PRs
+# (v7.9.0, #1071). So adding a fleet target is TWO facts in two systems. The second one:
+#
+#   Organization settings → GitHub Apps → dotgibson-fleet-sync → Configure →
+#   Repository access → add the repo.     (needs an Organization Owner)
+#
+# `make fleet-app-scope` reports on that installation, and
+# .github/workflows/fleet-app-scope.yml reds weekly if it stops matching this file.
+#
 # sync-core.sh, fleet-drift.sh and core-integrity.sh used to each keep a hardcoded
 # fallback array for when this file was missing or unreadable, which meant FOUR
 # coordinated edits and a fallback that ran in exactly the situation you were least
@@ -33,6 +47,21 @@
 #   dotfiles-Windows — the native Windows host layer is replicated from scratch
 #     (PowerShell; not a one-to-one port of the Unix Core), so it carries no
 #     vendored core/ subtree and sync-core.sh must never fan out into it.
+#   dotfiles-nvim — THE ARROW POINTS THE OTHER WAY. Core vendors the editor tree FROM
+#     that repo; it is not a repo Core fans out TO, and it has no core/ and no core.lock
+#     and never will (NVIM-SPLIT-PROPOSAL.md §7, closing note). Adding the name here
+#     would enlist it in every gate that reads this file through load_os_repos — the
+#     fan-out, core-integrity, fleet-drift, fleet-vocabulary, fleet-vendor-guidance and
+#     the audit's fleet registers — each of which would then demand a vendored tree that
+#     does not exist. It also has its own consequence in a place git cannot see: the
+#     fleet App's installation list is compared against THIS file plus three exceptions
+#     (scripts/fleet-app-scope.sh), so a repo with App access belongs in that script's
+#     EXTRA_REPOS, not here — and dotfiles-nvim belongs in neither, because Core only
+#     ever clones and reads it over a public URL and mints no token against it.
+#
+#     Where its facts DO live, now that #1123 has vendored it: the revision in nvim.lock,
+#     the staleness report in scripts/check-nvim-freshness.sh, the refresh in
+#     scripts/sync-nvim.sh, and the tree-vs-pin gate in audit-core.sh §9q.
 # ──────────────────────────────────────────────────────────────────────────────
 dotfiles-MacBook
 dotfiles-Alpine
@@ -41,5 +70,6 @@ dotfiles-Debian
 dotfiles-Defense
 dotfiles-Fedora
 dotfiles-Gentoo
+dotfiles-NixOS
 dotfiles-Offense
 dotfiles-openSUSE

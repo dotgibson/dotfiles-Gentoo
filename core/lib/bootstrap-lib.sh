@@ -28,9 +28,14 @@
 # order), and degrades to plain/no-colour when it hasn't — so this file has no hard
 # ordering dependency on ux.sh.
 #
-# Usage (in an OS bootstrap.sh):
+# Usage (in an OS bootstrap.sh) — the DRIVER form, since #976: declare, define hooks, call.
 #   source "$DOTFILES/core/lib/ux.sh"
 #   source "$DOTFILES/core/lib/bootstrap-lib.sh"
+#   BOOTSTRAP_NAME=Fedora BOOTSTRAP_OS=fedora
+#   bootstrap_provision() { blib_read_pkgs_into pkgs "$DOTFILES/install/packages.txt" || exit 1
+#                           blib_priv dnf install -y "${pkgs[@]}"; }
+#   blib_main "$@"        # flags, guard, escalator, probe, provision, wire, closing report
+# The helpers below are also callable one by one (the pre-#976 form every repo still runs):
 #   blib_is_wsl && IS_WSL=1
 #   wire_links() {
 #     blib_link_core      "$DOTFILES" "$CONFIG"
@@ -105,6 +110,28 @@ blib_is_wsl() {
 # PID only ever tiebreaks WITHIN a second (the stamp differs otherwise), so it does not
 # disturb the cross-second ordering the sort relies on.
 _blib_backup_suffix() { printf 'pre-dotfiles.%s.%s' "$(date +%Y%m%d-%H%M%S)" "$$"; }
+
+# ── mutate only what is not already right ─────────────────────────────────────
+# A bootstrap is "idempotent" only if its SECOND run invokes no mutating command at all,
+# and the scaffolded test/check-links.sh (scripts/new-os-repo.sh) holds it to exactly
+# that: rm/ln/mv/cp/mkdir/chmod are shimmed on the second run and any invocation is red.
+# An unconditional `chmod +x` or `mkdir -p` is a no-op on disk and a defect under that
+# witness, so the wiring below asks first. `find -prune -perm 700` is the POSIX mode
+# test (no `stat -c`, no `--printf`; this runs on the macOS lane too).
+_blib_ensure_exec() { # _blib_ensure_exec <file>… — chmod +x only what lacks it
+  local f
+  for f in "$@"; do
+    [[ -f "$f" && ! -x "$f" ]] || continue
+    chmod +x "$f" 2>/dev/null || true
+  done
+}
+_blib_private_dir() { # _blib_private_dir <dir>… — mkdir -p and chmod 700, each only when needed
+  local d
+  for d in "$@"; do
+    [[ -d "$d" ]] || mkdir -p "$d"
+    [[ -n "$(find "$d" -prune -perm 700 2>/dev/null)" ]] || chmod 700 "$d"
+  done
+}
 
 # ── symlink with backup ───────────────────────────────────────────────────────
 # blib_link <src> <dst> — replace an existing SYMLINK in place; back up a real file
@@ -544,7 +571,12 @@ blib_migrate_v4() {
     [[ -L "$zdir/$m.zsh" ]] && rm -f "$zdir/$m.zsh" "$zdir/$m.zsh.zwc"
   done
   # stale pre-v4 compdump in the config tree (10-options.zsh now writes it to $XDG_CACHE_HOME).
-  rm -f "$zdir/.zcompdump" "$zdir/.zcompdump.zwc"
+  # Only when one is there: an unconditional rm is a mutating command on every run, which
+  # the scaffolded check-links.sh's second-run witness reads as a change (#999).
+  for m in "$zdir/.zcompdump" "$zdir/.zcompdump.zwc"; do
+    [[ -e "$m" ]] && rm -f "$m"
+  done
+  return 0
 }
 
 # ── symlink the vendored Core surface ─────────────────────────────────────────
@@ -584,7 +616,7 @@ blib_link_core() {
     # the bindings here: this comment named "prefix w/T/f" and had already fallen behind `?`.
     if [[ -d "$dotfiles/core/tmux/scripts" ]]; then
       blib_link "$dotfiles/core/tmux/scripts" "$config/tmux/scripts"
-      _blib_dry || chmod +x "$dotfiles"/core/tmux/scripts/*.sh 2>/dev/null || true
+      _blib_dry || _blib_ensure_exec "$dotfiles"/core/tmux/scripts/*.sh
     fi
     # tmux plugin manager (tpm) — clone once so the theme + resurrect/continuum load.
     # Plugins still need one install pass: `prefix + I` in tmux.
@@ -662,11 +694,11 @@ blib_link_core() {
 
     # cross-OS helper scripts from Core onto PATH (~/.local/bin).
     if [[ -d "$dotfiles/core/bin" ]]; then
-      _blib_dry || mkdir -p "$HOME/.local/bin"
+      _blib_dry || [[ -d "$HOME/.local/bin" ]] || mkdir -p "$HOME/.local/bin"
       for s in clip clip-paste; do
         if [[ -f "$dotfiles/core/bin/$s" ]]; then
           blib_link "$dotfiles/core/bin/$s" "$HOME/.local/bin/$s"
-          _blib_dry || chmod +x "$dotfiles/core/bin/$s" 2>/dev/null || true
+          _blib_dry || _blib_ensure_exec "$dotfiles/core/bin/$s"
         fi
       done
     fi
@@ -693,8 +725,7 @@ blib_link_core() {
         blib_say "would link core/ssh/config into ~/.ssh (0700 ~/.ssh + sockets + config.d)"
       else
         blib_say "symlinking core/ssh/config"
-        mkdir -p "$HOME/.ssh/sockets" "$HOME/.ssh/config.d"
-        chmod 700 "$HOME/.ssh" "$HOME/.ssh/sockets" "$HOME/.ssh/config.d"
+        _blib_private_dir "$HOME/.ssh" "$HOME/.ssh/sockets" "$HOME/.ssh/config.d"
         blib_link "$dotfiles/core/ssh/config" "$HOME/.ssh/config"
         blib_ok "ssh/config linked into ~/.ssh (generate a key with: ssh-keygen -t ed25519)"
       fi
@@ -769,7 +800,7 @@ blib_link_os_layer() {
   # first-match-wins means a lower number beats this one. Directory created here rather
   # than relied upon: `--only zsh` skips blib_link_core, which is what creates it.
   if blib_want tools && [[ -f "$dotfiles/ssh/os.conf" ]]; then
-    _blib_dry || { mkdir -p "$HOME/.ssh/config.d"; chmod 700 "$HOME/.ssh" "$HOME/.ssh/config.d"; }
+    _blib_dry || _blib_private_dir "$HOME/.ssh" "$HOME/.ssh/config.d"
     blib_link "$dotfiles/ssh/os.conf" "$HOME/.ssh/config.d/50-os.conf"
   fi
 }
@@ -797,22 +828,19 @@ blib_link_os_layer() {
 # preserve a ~/.config/kali/ on a repo no longer called Kali) or a namespace parameter
 # (an argument whose only job is to keep a retired name alive).
 #
-# ONE ROLE REPO CALLS THIS, NOT BOTH. Offense does (its bootstrap.sh calls
-# blib_link_role_layer); Defense still hand-rolls the band in its own wire_defense_stage,
-# and adopting the helper there is what remains. core.manifest and PORTING-MATRIX.md both
-# record the same split — this comment used to claim the migration was finished, which was
-# the only one of the three that said so.
+# BOTH ROLE REPOS CALL THIS. Offense adopted it first; Defense followed in #976 (its
+# dotfiles-Defense#292), retiring the wire_defense_stage this comment, core.manifest and
+# PORTING-MATRIX.md all used to describe as outstanding. Nothing hand-rolls the 85 band now.
 #
-# Defense hand-rolls TWO of the three links (85-defense.zsh and templates); there is no
-# tmux/role.conf link because dotfiles-Defense/defense/ ships no defense.conf, whereas
-# Offense does ship offensive.conf. So the migration is low-risk: the tmux branch below is
-# [[ -f ]]-guarded and would simply no-op there.
+# Defense takes TWO of the three links (85-defense.zsh and templates) and not the third:
+# dotfiles-Defense/defense/ ships no defense.conf, whereas Offense does ship
+# offensive.conf, so the tmux branch below is [[ -f ]]-guarded and simply no-ops there.
 #
-# This exists because both role repos hand-rolled the same links and had already drifted:
-# Defense honours BLIB_DRY directly rather than the library's _blib_dry() when dropping the
-# stale pre-v4 link, and Offense did not — so a --dry-run in one repo mutated the box and in
-# the other did not. Present tense on Defense's half, deliberately: that fork is still live
-# and is the thing adopting the helper would retire.
+# This exists because both role repos hand-rolled the same links and had drifted while
+# they did: Defense honoured BLIB_DRY directly rather than the library's _blib_dry() when
+# dropping the stale pre-v4 link, and Offense did not — so a --dry-run in one repo mutated
+# the box and in the other did not. Both now go through the _blib_dry() guard below, which
+# is the divergence this helper existed to end.
 #
 # ONE ROLE PER BOX. Both roles land on band 85, so a machine that wired Offense and
 # then Defense would have 85-offensive.zsh and 85-defense.zsh loading in glob order and
@@ -893,6 +921,17 @@ blib_write_zshrc_loader() {
   fi
   if _blib_dry; then
     blib_say "would write managed ~/.zshrc loader (v4 numbered-fragment glob)"
+    # Announce AND COUNT the displacement, in the order the real run performs it (#1057).
+    # This is the one action in the whole wiring pass that touches a file the user owns,
+    # and it was the only backup site whose dry branch hid it: the plan said "would write"
+    # and the tally closed "0 backed up", then the real run warned that it had moved their
+    # ~/.zshrc. blib_link (would back up + link) and blib_install_system_file (would back
+    # up + write) have both always said it, and the phrase is deliberately theirs so the
+    # library has ONE grep for "a backup was planned".
+    if [[ -f "$rc" ]]; then
+      blib_say "would back up + write: $rc"
+      BLIB_BACKED=$((BLIB_BACKED + 1))
+    fi
     # Preview the seeding too — BLIB_DRY's contract is the FULL plan, and this is a
     # second file the real run creates.
     _blib_seed_zdotdir_rc "$rc"
@@ -907,6 +946,9 @@ blib_write_zshrc_loader() {
     rc_bak="$rc.$(_blib_backup_suffix)"
     cp "$rc" "$rc_bak"
     blib_warn "backed up existing $rc -> $rc_bak"
+    # Counted like every other backup site, so the closing tally cannot say "0 backed up"
+    # beside the warning above (#1026).
+    BLIB_BACKED=$((BLIB_BACKED + 1))
   fi
 
   cat >"$rc" <<'ZRC'
@@ -1278,7 +1320,41 @@ blib_sudo_keepalive_start() {
     blib_say "would prime sudo and keep its timestamp warm for the run"
     return 0
   }
-  "$su" -v || return 1
+  # THE PRIME, chosen by how this run can answer a prompt (#1018).
+  #
+  # `sudo -v` is the right prime when a person is at a terminal: it authenticates once,
+  # visibly, and refreshes nothing else. It is the WRONG probe for a run with no terminal —
+  # and not only because it cannot read a password. sudoers' `verifypw` defaults to `all`:
+  # `-v` prompts unless EVERY rule matching the user is NOPASSWD, and Fedora's stock
+  # `%wheel ALL=(ALL) ALL` beside a NOPASSWD drop-in is exactly one passworded rule too
+  # many. Measured on a booted bootc host (NON-MUTABLE-HOST-PROPOSAL.md, R1): `sudo -l`
+  # listed NOPASSWD for every command and `sudo -n true` succeeded, and this helper still
+  # died — "a terminal is required to read the password" — and the driver reported
+  # "authentication failed" for a run that had never been asked for a password.
+  #
+  # So, without a terminal: `-n -v` first (validates non-interactively — a warm ticket, or
+  # rules that satisfy verifypw), then `-n true` (a NOPASSWD user whom `-v` alone would
+  # prompt — the case above; the refresher below then keeps failing its `-n -v` harmlessly,
+  # since every command is passwordless anyway). `-n true` is a fallback, not the first
+  # probe, for the same reason the refresher uses `-v`: a sudoers restricted to the
+  # provisioning commands denies `true`. With SUDO_ASKPASS set, `-A -v` is sudo's own
+  # documented non-interactive path. Each failure says which of the three it was; the
+  # driver's line after it ("cannot provision packages") is the consequence, not the cause.
+  # "A terminal" means a CONTROLLING terminal — sudo reads the password from /dev/tty, not
+  # from stdin, so `curl … | bash` at a real terminal must still get the interactive prime.
+  if { : </dev/tty; } 2>/dev/null; then
+    "$su" -v || return 1
+  elif [[ -n "${SUDO_ASKPASS:-}" ]]; then
+    "$su" -A -v || {
+      blib_warn "sudo: the askpass helper did not authenticate (SUDO_ASKPASS=$SUDO_ASKPASS)"
+      return 1
+    }
+  else
+    "$su" -n -v 2>/dev/null || "$su" -n true 2>/dev/null || {
+      blib_warn "sudo needs a password and there is no terminal to ask on — run from a terminal, set SUDO_ASKPASS to a helper, or grant this user NOPASSWD for the run"
+      return 1
+    }
+  fi
   # `kill -0 "$$"`: $$ is the PARENT shell's pid even inside this background subshell, so
   # the refresher stops when the bootstrap exits even if the caller's trap is missed.
   # stdio redirected on purpose: the refresher OUTLIVES the call that started it, and a
@@ -1545,10 +1621,23 @@ blib_install_core_guard() {
     blib_warn "core-guard: $root already has a custom pre-commit hook — left as-is"
     return 0
   fi
+  # Already installed, byte for byte, and executable: nothing to do — and nothing to
+  # WRITE. Rewriting an identical hook on every run is invisible on disk but not to an
+  # idempotency witness that logs every mkdir/chmod (the scaffolded check-links.sh).
+  if [[ -x "$hook" ]] && [[ "$(cat "$hook" 2>/dev/null)" == "$_blib_core_guard_hook" ]]; then
+    return 0
+  fi
   # Surface a failure to create the hooks dir instead of silently returning success
   # (a returned 0 would leave the guard uninstalled with no signal to the caller).
-  mkdir -p "$hooks" || { blib_warn "core-guard: $root — could not create $hooks — skipped"; return 1; }
-  cat >"$hook" <<'HOOK'
+  [[ -d "$hooks" ]] || mkdir -p "$hooks" || { blib_warn "core-guard: $root — could not create $hooks — skipped"; return 1; }
+  printf '%s\n' "$_blib_core_guard_hook" >"$hook"
+  _blib_ensure_exec "$hook"
+  blib_ok "core-guard: pre-commit installed in ${root##*/}"
+}
+
+# The hook's text, held once so blib_install_core_guard can compare before it writes;
+# a heredoc into a variable rather than straight into the file, for that reason only.
+_blib_core_guard_hook="$(cat <<'HOOK'
 #!/usr/bin/env bash
 # dotfiles-core-guard — installed by dotfiles-core; do not edit by hand.
 # Refuses commits that modify the vendored core/ tree, which is OVERWRITTEN on the
@@ -1571,6 +1660,266 @@ staged=$(git diff --cached --name-only -- core/ 2>/dev/null) || exit 0
 } >&2
 exit 1
 HOOK
-  chmod +x "$hook"
-  blib_ok "core-guard: pre-commit installed in ${root##*/}"
+)"
+
+# ── the driver ────────────────────────────────────────────────────────────────
+# blib_main "$@" — run a whole OS/Role bootstrap: the shared skeleton every bootstrap.sh in
+# the fleet had hand-rolled, with a small set of NAMED hooks for what is genuinely that
+# repo's (V8-PROPOSAL.md §4.2(3), §4.4; dotgibson/dotfiles-core#976). The repo keeps its
+# core/ presence guard inline (the chicken-and-egg at the top of this file), sources
+# lib/ux.sh and this file, declares what it is, defines the hooks it needs, and ends with
+# `blib_main "$@"`. Nothing new is linked onto a host and nothing a host reads changes
+# meaning: the driver calls the same helpers, in the same order, that the repos already
+# call by hand — which is why §4.4 chose a repo-internal hook over a declared overlay.
+#
+# DECLARED by the repo (variables, before the call):
+#   BOOTSTRAP_NAME         "Fedora", "Defense" — the closing lines say it
+#   BOOTSTRAP_OS           fedora|alpine|… — wires the os/ overlays via blib_link_os_layer
+#   BOOTSTRAP_ROLE         defense|offensive — wires the band-85 role via blib_link_role_layer
+#   BOOTSTRAP_SU_PREFER    doas — blib_resolve_su --prefer, for a box whose declared
+#                          escalator is not sudo (os/alpine.capabilities)
+#   BOOTSTRAP_SU           lazy — the driver resolves NO escalator and runs NO sudo
+#                          keepalive; a hook that needs them calls blib_resolve_su and
+#                          blib_sudo_keepalive_start/_stop itself at the point of need
+#                          (Offense: only --install, and only its apt route, does).
+#                          Default: resolved up front, --require on a provisioning run,
+#                          the keepalive wrapped around bootstrap_provision.
+#   BOOTSTRAP_LOGIN_SHELL  0 to NOT call blib_set_login_shell (a role repo that installs
+#                          nothing and declines to sudo — Defense, Offense); pair it with
+#                          blib_login_shell_hint in bootstrap_closing to still say so
+#   BOOTSTRAP_STRICT_DEFAULT 1 to make a non-empty failure tally exit non-zero WITHOUT
+#                          --strict (Arch's contract: a package that did not install is
+#                          exit 1, always)
+#   BOOTSTRAP_FAIL_EXIT    the exit code for that case (default 1; openSUSE documents 2)
+#   DOTFILES, CONFIG       the repo root and $XDG_CONFIG_HOME, as every bootstrap sets them
+#
+# HOOKS (functions; each optional — the driver checks with `declare -F`):
+#   bootstrap_usage        print the repo's banner and its OWN flags; the driver prints the
+#                          shared flags after it
+#   bootstrap_flag <arg> [<next>]
+#                          return 0 having consumed a repo-specific flag (set your own var),
+#                          2 having consumed it AND the argument after it (the driver
+#                          shifts twice), 1 to say "not mine" — then the driver reports it
+#                          as unknown. `--x=VALUE` needs no second return code.
+#   bootstrap_guard        refuse to run on the wrong box (exit 1 yourself); runs first
+#   bootstrap_check        a report-only host probe; runs unless --links-only
+#   bootstrap_provision    install packages — runs only on a full run (not --links-only,
+#                          not --dry-run: provisioning is never faked), under a resolved
+#                          escalator and the sudo keepalive. Best-effort steps record with
+#                          blib_note_fail. Absent hook: no escalator is demanded at all.
+#   bootstrap_wire_pre_loader
+#                          links only this repo owns that must exist BEFORE the managed
+#                          ~/.zshrc is written — a capability re-link for a distro tier
+#                          (Debian, openSUSE), a script into ~/.local/bin (Gentoo)
+#   bootstrap_wire_post_loader
+#                          links that must come AFTER it — Alpine's ~/.zshenv ZDOTDIR shim.
+#                          Both through blib_link, so --dry-run and --only/--skip are
+#                          honoured for free.
+#   bootstrap_closing <degraded 0|1>
+#                          say what only this repo knows at the end (a "run mkcase" hint, a
+#                          login-shell nudge). Set BLIB_NEXT_HINT to change the closing
+#                          line's tail; return non-zero to say you have ALREADY described
+#                          the run's state and the driver should print no closing line.
+#
+# THE DRIVER'S OWN FLAGS (one definition, one --help): --links-only, --dry-run/-n,
+# --strict, --only=G,G / --only G,G, --skip=…, -h/--help. --dry-run previews the wiring,
+# runs the probe (report-only), and skips provisioning. --strict turns a non-empty failure
+# tally into exit BOOTSTRAP_FAIL_EXIT (1); misses are listed either way. Unknown flag: 2.
+#
+# EXPORTED for the hooks, always as 0 or 1 so a bare `((BLIB_DRY))` is safe under `set -u`:
+# BLIB_DRY (the lib's own switch), BLIB_LINKS_ONLY, BLIB_STRICT; and BLIB_SU when resolved.
+# Exit: 0 clean, 1 a hook refused or --strict with misses, 2 usage.
+#
+# NOT here, deliberately: --json, --uninstall, --quiet — MacBook's own surface, and the
+# reason MacBook is the one bootstrap this driver does not aim to absorb (its report is
+# the template for what a hook must be ABLE to express, not a target to flatten).
+_blib_main_usage() {
+  if declare -F bootstrap_usage >/dev/null 2>&1; then
+    bootstrap_usage
+    printf '\n'
+  else
+    printf 'usage: bootstrap.sh [flags]\n\n'
+  fi
+  cat <<'USAGE'
+Shared flags (core/lib/bootstrap-lib.sh :: blib_main):
+  --links-only        (re)create the symlinks only — no provisioning, no host probe
+  --dry-run, -n       print every planned change and change nothing; provisioning is
+                      skipped rather than faked
+  --strict            exit 1 if any best-effort step did not complete (misses are
+                      listed either way)
+  --only=G,G          wire ONLY these Core module groups   (zsh nvim tmux git prompt tools)
+  --skip=G,G          wire everything EXCEPT these groups
+  -h, --help          this text
+USAGE
+}
+
+blib_main() {
+  local _bm_a _bm_links=0 _bm_dry=0 _bm_only="" _bm_skip="" _bm_degraded=0 _bm_rc=0
+  local _bm_strict="${BOOTSTRAP_STRICT_DEFAULT:-0}" _bm_name="${BOOTSTRAP_NAME:-dotfiles}"
+  : "${DOTFILES:?blib_main: DOTFILES (the repo root) must be set before the call}"
+  : "${CONFIG:=${XDG_CONFIG_HOME:-$HOME/.config}}"
+  while (($#)); do
+    _bm_a="$1"
+    case "$_bm_a" in
+    --links-only) _bm_links=1 ;;
+    --dry-run | -n) _bm_dry=1 ;;
+    --strict) _bm_strict=1 ;;
+    --only=*) _bm_only="${_bm_a#*=}" ;;
+    --skip=*) _bm_skip="${_bm_a#*=}" ;;
+    --only | --skip)
+      # A value is required, and it must not itself look like a flag: `--only --strict`
+      # would otherwise silently select a group named "--strict" (blib_select rejects it,
+      # but with a message about groups rather than about the missing value).
+      if [[ $# -lt 2 || "${2-}" == -* ]]; then
+        blib_warn "$_bm_a requires module names, e.g. $_bm_a zsh,nvim"
+        return 2
+      fi
+      if [[ "$_bm_a" == --only ]]; then _bm_only="$2"; else _bm_skip="$2"; fi
+      shift
+      ;;
+    -h | --help)
+      _blib_main_usage
+      return 0
+      ;;
+    *)
+      _bm_rc=1
+      if declare -F bootstrap_flag >/dev/null 2>&1; then
+        bootstrap_flag "$_bm_a" "${2-}" && _bm_rc=0 || _bm_rc=$?
+      fi
+      case "$_bm_rc" in
+      0) ;;
+      2) shift ;; # the hook consumed the value after the flag too
+      *)
+        printf 'unknown flag: %s\n' "$_bm_a" >&2
+        _blib_main_usage >&2
+        return 2
+        ;;
+      esac
+      _bm_rc=0
+      ;;
+    esac
+    shift
+  done
+  # Re-read after the parse: a bootstrap_flag may have declared the policy (a
+  # `--tolerate-failures` that flips it off, say), and the declaration wins over the default.
+  ((_bm_strict)) || _bm_strict="${BOOTSTRAP_STRICT_DEFAULT:-0}"
+  # Always exported as 0 or 1, never left unset: a hook written `((BLIB_DRY)) || return 0`
+  # is valid bash and passes every linter, and under `set -u` it dies on the first REAL
+  # run — the exact leg (a stubbed full provision in CI) the dry-run test cannot cover.
+  # Found on dotgibson/dotfiles-Debian#78's first CI run; the driver now makes the knob
+  # safe to read bare, and BLIB_LINKS_ONLY / BLIB_STRICT are 0/1 for the same reason.
+  ((_bm_dry)) && BLIB_DRY=1
+  export BLIB_DRY="${BLIB_DRY:-0}" BLIB_LINKS_ONLY="$_bm_links" BLIB_STRICT="$_bm_strict"
+  # blib_select aborts the run itself on a malformed selector — called directly, never in
+  # a subshell, so that exit is the bootstrap's.
+  [[ -n "$_bm_only" ]] && blib_select --only "$_bm_only"
+  [[ -n "$_bm_skip" ]] && blib_select --skip "$_bm_skip"
+
+  if declare -F bootstrap_guard >/dev/null 2>&1; then bootstrap_guard; fi
+  # The PATH prelude: user-local bindirs first, so presence guards in the hooks tell the
+  # truth about what an earlier run installed (#748).
+  blib_user_bindirs_on_path
+
+  # ── escalator: demanded only when packages will actually be installed ──────────
+  # And resolved at all only when something privileged CAN happen — a provisioning hook, or
+  # the login-shell change (chsh + /etc/shells). A report-only role repo with neither must
+  # not be told "no privilege escalator found" on a box that has none; it needs none.
+  if [[ "${BOOTSTRAP_SU:-}" == lazy ]]; then
+    : # a hook resolves it at the point of need (Offense: inside --install)
+  elif declare -F bootstrap_provision >/dev/null 2>&1 && ((_bm_links == 0 && _bm_dry == 0)); then
+    blib_resolve_su ${BOOTSTRAP_SU_PREFER:+--prefer "$BOOTSTRAP_SU_PREFER"} --require || return 1
+  elif declare -F bootstrap_provision >/dev/null 2>&1 || [[ "${BOOTSTRAP_LOGIN_SHELL:-1}" != 0 ]]; then
+    blib_resolve_su ${BOOTSTRAP_SU_PREFER:+--prefer "$BOOTSTRAP_SU_PREFER"} || true
+  fi
+
+  # ── probe, then provision ────────────────────────────────────────────────────
+  if declare -F bootstrap_check >/dev/null 2>&1 && ((_bm_links == 0)); then bootstrap_check; fi
+  if declare -F bootstrap_provision >/dev/null 2>&1 && ((_bm_links == 0 && _bm_dry == 0)); then
+    if [[ "${BOOTSTRAP_SU:-}" == lazy ]]; then
+      # The hook owns escalation end to end: priming sudo here would prompt for a
+      # privilege the run may never use (Offense without --install, or on its pipx/go
+      # route), and on a box whose escalator is not sudo it would fail outright.
+      bootstrap_provision
+    else
+      trap 'blib_sudo_keepalive_stop' EXIT
+      blib_sudo_keepalive_start || {
+        blib_warn "sudo authentication failed — cannot provision packages"
+        return 1
+      }
+      bootstrap_provision
+      blib_sudo_keepalive_stop
+    fi
+  fi
+
+  # ── wire ────────────────────────────────────────────────────────────────────
+  blib_link_core "$DOTFILES" "$CONFIG"
+  if [[ -n "${BOOTSTRAP_OS:-}" ]]; then blib_link_os_layer "$DOTFILES" "$CONFIG" "$BOOTSTRAP_OS"; fi
+  if [[ -n "${BOOTSTRAP_ROLE:-}" ]]; then blib_link_role_layer "$DOTFILES" "$CONFIG" "$BOOTSTRAP_ROLE"; fi
+  if declare -F bootstrap_wire_pre_loader >/dev/null 2>&1; then bootstrap_wire_pre_loader; fi
+  blib_write_zshrc_loader
+  if declare -F bootstrap_wire_post_loader >/dev/null 2>&1; then bootstrap_wire_post_loader; fi
+  if [[ "${BOOTSTRAP_LOGIN_SHELL:-1}" != 0 ]]; then blib_set_login_shell; fi
+  # The local core/ guard writes .git/hooks unconditionally, so it is the one helper the
+  # driver gates on dry-run by hand.
+  if _blib_dry; then
+    blib_say "(dry run) would install the core/ pre-commit guard"
+  else
+    blib_install_core_guard "$DOTFILES" || true
+  fi
+  blib_wire_summary
+
+  # ── close ───────────────────────────────────────────────────────────────────
+  blib_failures_report || _bm_degraded=1
+  if declare -F bootstrap_closing >/dev/null 2>&1; then
+    bootstrap_closing "$_bm_degraded" || _bm_rc=1
+  fi
+  if ((_bm_rc == 0)); then
+    if ((_bm_degraded)); then
+      blib_warn "$_bm_name bootstrap finished WITH the misses above — ${BLIB_NEXT_HINT:-open a new shell, or: exec zsh}"
+    elif _blib_dry; then
+      blib_ok "$_bm_name dry run complete — nothing was changed; re-run without --dry-run to apply"
+    else
+      blib_ok "$_bm_name bootstrap complete — ${BLIB_NEXT_HINT:-open a new shell, or: exec zsh}"
+    fi
+  fi
+  if ((_bm_degraded && _bm_strict)); then
+    blib_warn "exiting non-zero (${BLIB_STRICT_WHY:---strict})"
+    return "${BOOTSTRAP_FAIL_EXIT:-1}"
+  fi
+  return 0
+}
+
+# blib_login_shell_hint — the REPORT-ONLY counterpart to blib_set_login_shell, for a
+# bootstrap whose contract is "installs nothing" (BOOTSTRAP_LOGIN_SHELL=0): say whether the
+# config just wired will ever load. Everything above wires a zsh config; on a box with no
+# zsh, or with zsh installed but not the login shell, every step still "succeeds" and
+# nothing ever reads ~/.zshrc. Defense and Offense each carried this guard, near-identically
+# (#976 folded them). Returns 1 when zsh is ABSENT — the wiring is inert and a closing hook
+# should not let the driver say "complete" — and 0 otherwise, with a chsh nudge when zsh is
+# present but not the login shell. Best-effort lookups, in descending order of trust
+# (getent, /etc/passwd, $SHELL), each guarded: under `pipefail` a getent that exits 2 for a
+# user outside the passwd DB would otherwise take the bootstrap down on its last line.
+blib_login_shell_hint() {
+  local user shell_field="" login_shell
+  user="$(id -un 2>/dev/null || true)"
+  if [[ -n "$user" ]]; then
+    if command -v getent >/dev/null 2>&1; then
+      shell_field="$(getent passwd "$user" 2>/dev/null | cut -d: -f7 || true)"
+    fi
+    if [[ -z "$shell_field" && -r /etc/passwd ]]; then
+      shell_field="$(awk -F: -v u="$user" '$1 == u { print $7; exit }' /etc/passwd 2>/dev/null || true)"
+    fi
+  fi
+  login_shell="${shell_field:-${SHELL:-}}"
+  if ! command -v zsh >/dev/null 2>&1; then
+    blib_warn "zsh is NOT installed — the config above is wired but inert; nothing reads ~/.zshrc"
+    blib_warn "  your OS-native layer owns package installation"
+    return 1
+  fi
+  if [[ "$login_shell" != *zsh ]]; then
+    blib_warn "zsh is installed, but your login shell is ${login_shell:-unknown}"
+    blib_warn "  fix: chsh -s $(command -v zsh)  — takes effect at next login"
+    BLIB_NEXT_HINT="for this session: exec zsh"
+  fi
+  return 0
 }
