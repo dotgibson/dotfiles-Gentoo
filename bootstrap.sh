@@ -1149,7 +1149,7 @@ provision() {
   fi
   # ── cargo builds Core actively WIRES (not optional) ──────────────────────────
   # viddy backs the watch->viddy alias. tree-sitter-cli was the other one here and
-  # is gone on purpose: ::gentoo carries dev-util/tree-sitter-cli 0.26.11 STABLE,
+  # is gone on purpose: ::gentoo carries dev-util/tree-sitter-cli 0.26.12 STABLE,
   # which clears nvim-treesitter's 0.26.1 floor, so it is an atom in
   # install/packages.txt and Portage owns the upgrade. NB an already-provisioned box
   # keeps its ~/.cargo/bin/tree-sitter until you remove it — that binary is what
