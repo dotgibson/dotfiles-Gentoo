@@ -8,7 +8,7 @@ vendors only what a machine actually runs.
 
 ## What this repo is
 
-`dotfiles-Gentoo` is the **OS-native layer for Gentoo** in an **eleven-repo dotfiles system** built on a three-layer
+`dotfiles-Gentoo` is the **OS-native layer for Gentoo** in a **twelve-repo dotfiles system** built on a three-layer
 model (Core → OS-native → Role). Stamped from the Fedora template (see `core/PORTING-MATRIX.md`). Source-based — `emerge` **compiles** packages, so expect real build time. **USE flags** gate features at compile time, and package names are full atoms (`category/name`).
 
 ## The rule that bites

@@ -37,6 +37,12 @@ typeset -g _CORE_WHATSNEW_STATE="${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles-
 # checkout root from it. _core_status_provenance is where that gate lives.
 typeset -g _CORE_LOCK_FILE="${${(%):-%x}:A:h:h:h}/core.lock"
 
+# The HOST's relink stamp (#1154) — which Core this box's symlinks were last wired against,
+# written by bootstrap.sh (core/lib/bootstrap-lib.sh :: blib_write_relink_stamp). core.lock
+# above is what the REPO vendored; this is what the BOX relinked. _core_relink_state
+# compares the two.
+typeset -g _CORE_RELINK_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles-core/bootstrap.lock"
+
 # _core_install_prefix → the copy-pasteable "install" command prefix for this box.
 # Used by core-doctor (U2) and the command-not-found handler (U1) to turn a missing tool
 # into an actionable line instead of a bare ✗. Non-zero when it cannot answer, and the
@@ -156,6 +162,65 @@ _core_status_root() {
   emulate -L zsh
   [[ -r "$_CORE_LOCK_FILE" ]] || return 1
   print -r -- "${_CORE_LOCK_FILE:h}"
+}
+
+# _core_relink_state — has THIS BOX relinked against the Core its checkout vendors (#1154)?
+# Sets REPLY to a verdict, REPLY2 to a machine token (the _core_status_integrity convention),
+# and reply to (stamp_sha mode linked_at) for the JSON emitter. Tokens:
+#   current   the stamp's core_sha is core.lock's
+#   pending   it is not — the repo moved and the box has not re-run bootstrap
+#   unknown   no stamp (bootstrapped before it existed) or a malformed one — never red
+#   other     the stamp was written from a different checkout; informational
+#   na        no core.lock: this is Core itself, or not a consumer
+# FORK-FREE, because the shell-start nudge calls it on every interactive shell: both files
+# are read with the builtin `read`, never `$(_core_status_kv …)`, which forks per key.
+_core_relink_state() {
+  emulate -L zsh
+  local _l _k _v l_sha='' l_tag='' s_sha='' s_tag='' s_mode='' s_at='' s_dir=''
+  reply=('' '' '')
+  if [[ ! -r "$_CORE_LOCK_FILE" ]]; then
+    REPLY="no core.lock — not a vendored consumer"; REPLY2=na; return 0
+  fi
+  while IFS= read -r _l || [[ -n "$_l" ]]; do
+    _k="${_l%%=*}" _v="${_l#*=}"
+    case "$_k" in
+    core_sha) [[ -n "$l_sha" ]] || l_sha="$_v" ;;
+    core_tag) [[ -n "$l_tag" ]] || l_tag="$_v" ;;
+    esac
+  done <"$_CORE_LOCK_FILE"
+  if [[ ! -r "$_CORE_RELINK_STAMP" ]]; then
+    REPLY="unknown — bootstrapped before the relink stamp existed; re-run ./bootstrap.sh --links-only to record it"
+    REPLY2=unknown; return 0
+  fi
+  while IFS= read -r _l || [[ -n "$_l" ]]; do
+    [[ "$_l" == \#* ]] && continue
+    _k="${_l%%=*}" _v="${_l#*=}"
+    case "$_k" in
+    core_sha) [[ -n "$s_sha" ]] || s_sha="$_v" ;;
+    core_tag) [[ -n "$s_tag" ]] || s_tag="$_v" ;;
+    mode) [[ -n "$s_mode" ]] || s_mode="$_v" ;;
+    linked_at) [[ -n "$s_at" ]] || s_at="$_v" ;;
+    dotfiles) [[ -n "$s_dir" ]] || s_dir="$_v" ;;
+    esac
+  done <"$_CORE_RELINK_STAMP"
+  reply=("$s_sha" "$s_mode" "$s_at")
+  if (( ${#s_sha} != 40 )) || [[ "$s_sha" == *[^[:xdigit:]]* ]]; then
+    REPLY="unknown — the relink stamp is malformed (core_sha: ${s_sha:-empty}); re-run ./bootstrap.sh --links-only"
+    REPLY2=unknown; return 0
+  fi
+  if [[ -n "$s_dir" && "$s_dir" != "${_CORE_LOCK_FILE:h}" ]]; then
+    REPLY="last relinked from another checkout (${s_dir})"; REPLY2=other; return 0
+  fi
+  if [[ "$s_sha" == "$l_sha" ]]; then
+    REPLY="relinked at ${s_tag:-${s_sha[1,12]}}${s_at:+ (${s_at})}"; REPLY2=current
+  else
+    # Same tag, different sha: a fan-out of an untagged Core commit. Name the shas then, or
+    # the line reads "relinked at v7.12.0 — repo vendors v7.12.0".
+    local _from="${s_tag:-${s_sha[1,12]}}" _to="${l_tag:-${l_sha[1,12]}}"
+    [[ "$_from" == "$_to" ]] && _from="${s_sha[1,12]}" _to="${l_sha[1,12]}"
+    REPLY="relinked at ${_from} — repo vendors ${_to}, run ./bootstrap.sh --links-only"
+    REPLY2=pending
+  fi
 }
 
 # _core_status_os — the OS layer's NAME on stdout ("fedora"), non-zero when undeclarable.
@@ -609,7 +674,7 @@ _core_status_json() {
 #   core update [-y|-n]             → up
 #   core update check               → update-check
 #   core whatsnew [--full] [--all]  → core-whatsnew
-#   core status [--json]            → core-status
+#   core status [--json] [--deep]   → core-status
 #   core maint <verb>               → maint-install|run|log|status|uninstall  (bare `core maint` lists them)
 #   core sync                       → gsync
 # The subcommand lists are the single source the completion (_core), the
@@ -1233,6 +1298,21 @@ _core_doctor_json() {
   if [[ -n ${_CORE_ATUIN_DAEMON_DEGRADED:-} ]]; then print -rn -- true; else print -rn -- false; fi
   print -rn -- ",\"was_up\":"
   if [[ -n ${_CORE_ATUIN_DAEMON_WAS_UP:-} ]]; then print -rn -- true; else print -rn -- false; fi
+  # The wedged pid, or 0. A NUMBER rather than a boolean because the pid is the actionable part
+  # — "wedged" tells you to go looking, the pid tells you what to kill.
+  print -rn -- ",\"wedged_pid\":${_CORE_ATUIN_DAEMON_WEDGED:-0}"
+  # The host's relink stamp against core.lock (#1154) — a NEW key, so no published shape
+  # widens. `status` is the token set of _core_relink_state (current/pending/unknown/other/
+  # na); a release gate asks each box `jq -e '.relink.status == "current"'`. The stamp's own
+  # values are data a hand-edit could have put anything into, so they go through the escaper.
+  local REPLY2
+  local -a reply
+  _core_relink_state
+  print -rn -- "},\"relink\":{\"status\":"; _core_status_jstr "$REPLY2"
+  print -rn -- ",\"detail\":"; _core_status_jstr "$REPLY"
+  print -rn -- ",\"core_sha\":"; _core_status_jstr "${reply[1]}"
+  print -rn -- ",\"mode\":"; _core_status_jstr "${reply[2]}"
+  print -rn -- ",\"linked_at\":"; _core_status_jstr "${reply[3]}"
   print -rn -- "},\"resolved\":{\"fd\":\"${FD_BIN:-}\",\"bat\":\"${BAT_BIN:-}\""
   (($+functions[_pkgup_mgr])) && print -rn -- ",\"pkg_manager\":\"$(_pkgup_mgr)\""
   print -r -- "}}"
@@ -1371,14 +1451,36 @@ _core_doctor_render() {
   # remedy used to vanish wherever it was, while the rows it explains stayed. Since #763
   # _core_install_prefix reads PKG_INSTALL and nothing else, so the manager token is not
   # consulted at all and the block is silent only on a box with no declaration.
+  #
+  # THE STAGED HOST (#1049). Two declared facts change what "missing" means, and both are
+  # read through the same accessor the prefix is (absent on the nine mutable repos):
+  #   · PKG_APPLY_PENDING says a change is STAGED — on bootc/MicroOS a tool the operator
+  #     already layered is on no PATH until the reboot, so the honest line is "reboot to
+  #     use", not "install with". _core_cap_staged is band 02 and guarded for the
+  #     standalone (ui+functions) harness exactly as _core_cap is in _core_install_prefix.
+  #   · PROVISIONER=declarative — `nix-env -i` (the declared PKG_INSTALL) installs into the
+  #     user profile and the next `nixos-rebuild` does not know about it; the durable fix is
+  #     the declaration. Say so, and keep the imperative verb as the until-then.
   if ((${#missing})); then
-    local _pfx
+    local _pfx _prov=''
+    ((${+functions[_core_cap]})) && _prov="$(_core_cap PROVISIONER)"
     if _pfx="$(_core_install_prefix)"; then
       print -r -- "${c}install missing${r}"
       print -r -- "  ${d}${missing[*]}${r}"
+      if ((${+functions[_core_cap_staged]})) && _core_cap_staged; then
+        local _apply
+        _apply="$(_core_cap PKG_APPLY)"
+        print -r -- "  ${d}an update is staged — a tool it layered is present only after a reboot${_apply:+ (${_apply})};${r}"
+        print -r -- "  ${d}re-run core-doctor then, before installing anything twice${r}"
+      fi
       print -r -- "  ${d}those are command names — the package is often called something else${r}"
       print -r -- "  ${d}(rg=ripgrep, delta=git-delta) and some aren't packaged on every distro,${r}"
-      print -r -- "  ${d}so install per tool: ${_pfx} <pkg>${r}"
+      if [[ "$_prov" == declarative ]]; then
+        print -r -- "  ${d}so declare per tool: add it to home.packages (home-manager) or${r}"
+        print -r -- "  ${d}environment.systemPackages (configuration.nix); ${_pfx} <pkg> installs it imperatively until then${r}"
+      else
+        print -r -- "  ${d}so install per tool: ${_pfx} <pkg>${r}"
+      fi
       print -r -- "  ${d}see core/PORTING-MATRIX.md for the per-tool name and install path${r}"
     fi
   fi
@@ -1485,12 +1587,36 @@ _core_doctor_render() {
         else
           wline+=" ${d}(daemon socket unreachable at startup → direct writes)${r}"
         fi
+      # A THIRD state, and deliberately not folded into the two above: under autostart the
+      # guard warns and changes NOTHING, so this shell is neither healthy nor degraded — the
+      # daemon is still enabled, still the launcher, and still wedged. The pid is carried in
+      # the flag because it is the whole remedy: killing it is what lets autostart work again.
+      elif [[ $w == atuin && -n ${_CORE_ATUIN_DAEMON_WEDGED:-} ]]; then
+        wline+=" ${d}(daemon WEDGED at pid ${_CORE_ATUIN_DAEMON_WEDGED} — alive, not serving; kill it)${r}"
       fi
     else wline+="  ${d}○ ${w} (idle)${r}"; fi
   done
   if [[ -n "$wline" ]]; then
     print -r -- "${c}integrations wired${r}"
     print -r -- " $wline"
+  fi
+
+  # Has THIS BOX relinked against the Core its checkout vendors (#1154)? core.lock says what
+  # the repo holds; only bootstrap's stamp says what the symlinks were wired against. Past
+  # "\nopt-in" like the blocks above, and glyph-free, so the parity test cannot see it. Silent
+  # on `na` (Core itself, or no consumer checkout): there is nothing to compare.
+  local REPLY2 _rl_tok
+  local -a reply
+  _core_relink_state; _rl_tok=$REPLY2
+  if [[ "$_rl_tok" != na ]]; then
+    print -r -- "${c}relink${r}"
+    if [[ "$_rl_tok" == pending ]]; then
+      print -r -- "  ${y}${REPLY}${r}"
+    else
+      print -r -- "  ${d}${REPLY}${r}"
+    fi
+    [[ "$_rl_tok" == unknown ]] &&
+      print -r -- "  ${d}until then the live check is: CORE_CAP_LOUD=1 zsh -i -c 'print -r -- \${#_CORE_CAP}'${r}"
   fi
 
   # Resolved binary names + the detected package manager — the behaviour-affecting bits
@@ -1974,7 +2100,41 @@ cdup() {
 # recurse forever). ouch (if installed) handles every format from one binary; the
 # hand-rolled case is the bare-box fallback.
 _extract_dispatch() {
-  [[ -n ${HAVE_OUCH:-} ]] && { ouch decompress "$1"; return; }
+  if [[ -n ${HAVE_OUCH:-} ]]; then
+    # ouch 0.8.0 changed its default: an ARCHIVE now unpacks into ./<basename>/ rather than
+    # into the CWD, with --here restoring the old shape (ouch-org/ouch#962). Everything around
+    # this line still assumes the CWD — extract()'s tarbomb guard mkdir's its own containment
+    # directory and cd's into it, its clobber guard tests CWD-relative names, and the fallback
+    # below is plain `tar xzf` — so Core pins the old semantics rather than letting the same
+    # `extract foo.tar.gz` build two different trees depending on which ouch a box happens to
+    # carry. openSUSE Leap ships 0.5.1 and Arch ships 0.8.3 TODAY; this is live, not theoretical.
+    #
+    # PROBED, never version-gated. That is PORTING-MATRIX.md's sd rule (footnote 22): sniff a
+    # version only where the version is honest, otherwise ask the CLI what it can do. Probing is
+    # also fail-safe here in a way a version compare is not — a build with no --here is a build
+    # that already extracts into the CWD, so the flag comes out absent exactly where passing it
+    # would have been wrong. One fork, paid only by an interactive `extract`, never at startup.
+    local -a here=()
+    [[ "$(ouch decompress --help 2>/dev/null)" == *--here* ]] && here=(--here)
+    # gz/bz2 are the exception, and NOT because of 0.8.0 — this one predates it. ouch writes a
+    # single decompressed file into the CWD on every version, while gunzip/bunzip2 below write
+    # NEXT TO the archive, which is the target extract()'s clobber guard checks (${abs:r}). On an
+    # ouch box the guard therefore vetoed a collision that could not happen and missed the one
+    # that could. Run ouch from the archive's own directory so the guard and the unpack agree
+    # about where the file lands. (Single files never get 0.8.0's subdirectory, measured — so
+    # --here is merely harmless here, not the fix.)
+    local dir=
+    case "$1" in
+    *.tar.gz | *.tgz | *.tar.bz2 | *.tbz2) ;; # real archives: the --here path above
+    *.gz | *.bz2) dir="${1:h}" ;;
+    esac
+    if [[ -n "$dir" ]]; then
+      (cd -- "$dir" && ouch decompress "${here[@]}" "$1")
+    else
+      ouch decompress "${here[@]}" "$1"
+    fi
+    return
+  fi
   case "$1" in
   *.tar.bz2 | *.tbz2) tar xjf "$1" ;;
   *.tar.gz | *.tgz) tar xzf "$1" ;;
