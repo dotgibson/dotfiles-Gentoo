@@ -12,20 +12,21 @@
 # WHY THIS IS NOT OPTIONAL. On a stable profile, several tools in this stack have
 # NO stable-keyworded version in ::gentoo at all, so `emerge` refuses them outright
 # and `core doctor` reports a permanent ✗. Verified on 23.0/desktop, re-checked
-# 2026-09-06:
+# 2026-09-29 against packages.gentoo.org:
 #
 #     app-shells/zoxide     6 ebuilds, 0 with a stable amd64 keyword
 #     sys-fs/duf            2 ebuilds, 0 with a stable amd64 keyword
-#     dev-util/difftastic   2 ebuilds, 0 with a stable amd64 keyword
+#     dev-util/difftastic   3 ebuilds, 0 with a stable amd64 keyword
+#     dev-python/jc         2 ebuilds, 0 with a stable amd64 keyword
 #
-# dev-util/shellcheck was the fourth and is gone from this file on purpose — see
+# dev-util/shellcheck used to be listed here too and is gone on purpose — see
 # the shellcheck note at the bottom before adding it back.
 #
 # THERE ARE NOW TWO KINDS OF LINE HERE, and the difference matters when you read a
 # line and ask whether it is still needed:
 #
 #   unreachable — no stable ebuild exists, so the atom cannot install at all. The
-#                 three above, plus dev-vcs/jj and every GURU atom.
+#                 four above, plus dev-vcs/jj and every GURU atom.
 #   below-floor — the atom installs fine on stable, but the stable version is under
 #                 a minimum Core requires. Version-restricted (`>=atom-x.y.z`) so
 #                 that older versions keep tracking stable. One today: neovim.
@@ -47,6 +48,11 @@
 # No stable keyword exists for these; without the line they cannot install at all.
 app-shells/zoxide ~__ARCH__
 sys-fs/duf ~__ARCH__
+# jc (dotgibson/dotfiles-core#1208): KEYWORDS="~amd64 ~arm64 ~ppc64" on both
+# ebuilds (1.25.7, 1.26.0). Unlike luv below, its dependencies are NOT the problem —
+# dev-python/{pygments,ruamel-yaml,xmltodict} are all stable — so this one line is
+# the whole fix. It carries ~arm64 too, so unlike jj it is reachable on arm64.
+dev-python/jc ~__ARCH__
 
 # ── ::gentoo stable, but BELOW a floor Core requires ──────────────────────────
 # NOT a reachability line: app-editors/neovim installs perfectly well on a stable

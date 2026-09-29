@@ -52,6 +52,7 @@ carapace = "latest"
 gum = "latest"
 # ── data / net ───────────────────────────────────────────────────────────────
 jq = "latest"
+jc = "latest"            # command output -> JSON; aqua:kellyjonbrazil/jc (dotfiles-core#1208)
 yq = "latest"            # mikefarah's Go yq, per PORTING-MATRIX footnote 6
 jnv = "latest"
 gron = "latest"

@@ -4,17 +4,19 @@
 # cargo build here; ::gentoo packages it now and it is an atom below.
 #
 # Heads-up: several modern Rust CLIs are ~amd64 (testing-keyworded) on a stable
-# profile, and THREE of them have NO stable ebuild at all: app-shells/zoxide,
-# sys-fs/duf and dev-util/difftastic. (Checked 2026-09-27 — this count is what the
-# next reader uses to judge whether a new atom needs a keyword line, so re-check it
-# rather than trusting it. It was FOUR until dev-util/shellcheck was swapped for
-# dev-util/shellcheck-bin, which is stable — see that atom's note below. It counts
-# THIS list only: dev-vcs/jj has no stable ebuild either, but bootstrap.sh's extras
-# block emerges it, and gentoo/package.accept_keywords counts it as "unreachable"
-# alongside these three.) A fourth
+# profile, and FOUR of them have NO stable ebuild at all: app-shells/zoxide,
+# sys-fs/duf, dev-util/difftastic and dev-python/jc. (Checked 2026-09-29 — this
+# count is what the next reader uses to judge whether a new atom needs a keyword
+# line, so re-check it rather than trusting it. It was four once before, until
+# dev-util/shellcheck was swapped for dev-util/shellcheck-bin, which is stable —
+# see that atom's note below — and went back to four when jc landed
+# (dotgibson/dotfiles-core#1208). It counts THIS list only: dev-vcs/jj has no
+# stable ebuild either, but bootstrap.sh's extras block emerges it, and
+# gentoo/package.accept_keywords counts it as "unreachable" alongside these
+# four.) A fifth
 # atom is keyworded for a different reason entirely: app-editors/neovim IS stable,
 # just below the version Core requires — see the `# min:` floors below.
-# bootstrap.sh installs gentoo/package.accept_keywords covering all four, so
+# bootstrap.sh installs gentoo/package.accept_keywords covering all five, so
 # this list emerges cleanly on stable; --no-portage-config opts out, and
 # gentoo/package.use.example stays a review-and-copy template (USE is your call).
 # Building from source is slow — enable the binhost (--getbinpkg, see README).
@@ -226,6 +228,15 @@ app-eselect/eselect-repository  # bin:- — it ships an eselect MODULE, not a bi
 net-misc/curl
 net-misc/wget
 app-misc/jq
+dev-python/jc           # command output -> JSON (`dig example.com | jc --dig | jq`);
+                        #   the parser half of jq. ~amd64 ~arm64 ~ppc64 with NO
+                        #   stable ebuild (1.25.7, 1.26.0), hence its line in
+                        #   gentoo/package.accept_keywords. It is dev-python/, NOT
+                        #   app-misc/jc — that atom does not exist. distutils-r1, so
+                        #   it builds for the profile's default PYTHON_TARGETS
+                        #   (PYTHON_COMPAT 3.12-3.15) and python-exec puts `jc` in
+                        #   /usr/bin; its three deps (pygments, ruamel-yaml,
+                        #   xmltodict) are all stable, so the one line suffices
 www-client/w3m          # terminal web browser (text-mode; renders tables + inline
                         #   images). NB 0.5.6, stable on amd64, but the package is
                         #   maintainer-needed as of 2026-08-23 — the same hedge as
