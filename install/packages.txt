@@ -5,10 +5,13 @@
 #
 # Heads-up: several modern Rust CLIs are ~amd64 (testing-keyworded) on a stable
 # profile, and THREE of them have NO stable ebuild at all: app-shells/zoxide,
-# sys-fs/duf and dev-util/difftastic. (Checked 2026-09-06 — this count is what the
+# sys-fs/duf and dev-util/difftastic. (Checked 2026-09-27 — this count is what the
 # next reader uses to judge whether a new atom needs a keyword line, so re-check it
 # rather than trusting it. It was FOUR until dev-util/shellcheck was swapped for
-# dev-util/shellcheck-bin, which is stable — see that atom's note below.) A fourth
+# dev-util/shellcheck-bin, which is stable — see that atom's note below. It counts
+# THIS list only: dev-vcs/jj has no stable ebuild either, but bootstrap.sh's extras
+# block emerges it, and gentoo/package.accept_keywords counts it as "unreachable"
+# alongside these three.) A fourth
 # atom is keyworded for a different reason entirely: app-editors/neovim IS stable,
 # just below the version Core requires — see the `# min:` floors below.
 # bootstrap.sh installs gentoo/package.accept_keywords covering all four, so
@@ -92,8 +95,8 @@ app-misc/yq-go          # bin:yq — mikefarah's GO yq (NOT app-misc/yq, which i
 #   -stdlib=libc++. gentoo/mise-tools.toml has documented that cause since user
 #   mode was written; the privileged path just never read its own note, and every
 #   sweep logged a bare "cargo build failed" (issue #133).
-#   GURU's app-arch/ouch is 0.8.2, level with upstream's 0.8.2 (2026-08-31;
-#   re-checked 2026-09-13, issue #180) — so the route-around bought NO version
+#   GURU's app-arch/ouch is 0.8.3, level with upstream's 0.8.3 (2026-09-13;
+#   re-checked 2026-09-27, issue #209) — so the route-around bought NO version
 #   advantage at all and cost the build — and its src_prepare() seds that exact
 #   flag out. So: Portage owns the upgrade, the binary lands in /usr/bin, a
 #   binhost can supply it, and it actually builds. Same reasoning that moved

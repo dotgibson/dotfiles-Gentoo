@@ -79,6 +79,13 @@ sys-fs/duf ~__ARCH__
 #
 # Version-restricted for the same reason neovim's line is: the older luv ebuilds are
 # stable and should keep tracking stable.
+#
+# NB maintainer-needed as of 2026-09-27 (metadata.xml carries no <maintainer>) —
+# the same hedge as lnav and w3m in install/packages.txt, since orphaning is what
+# precedes a treeclean, and here it sits one level under the editor. Availability is
+# unchanged: 1.52.1.0 is still ~arch and the newest stable is 1.50.0.1. A watch
+# item, not a break. core/PORTING-MATRIX.md footnote 33 wants the same hedge — fix
+# it in dotfiles-core, not in the vendored copy here.
 >=dev-lua/luv-1.52.1 ~__ARCH__
 
 # ── ::gentoo dev/repo tooling, testing-only ───────────────────────────────────
@@ -97,7 +104,7 @@ dev-util/difftastic ~__ARCH__
 # check 7 reads it from the extras_install call, the same way checks 5-6 read the
 # guru_install list.
 #
-# ::gentoo gained dev-vcs/jj on 2025-12-04. All five ebuilds (0.40.0 - 0.45.1)
+# ::gentoo gained dev-vcs/jj on 2025-12-04. All six ebuilds (0.40.0 - 0.45.1-r1)
 # are KEYWORDS="~amd64" with no stable version, so without this line the emerge
 # is refused outright — the same shape as zoxide and duf above.
 #
@@ -116,8 +123,8 @@ dev-vcs/jj ~__ARCH__
 #
 # It was a `cargo install --locked ouch` until issue #133: that build fails on any
 # GCC/libstdc++ box (its default unrar feature pulls unrar-ng-sys, whose build.rs
-# hard-codes -stdlib=libc++), and GURU's ebuild already patches that flag out while
-# trailing upstream by one patch release. See install/packages.txt for the full note.
+# hard-codes -stdlib=libc++), and GURU's ebuild already patches that flag out and
+# is level with upstream. See install/packages.txt for the full note.
 app-arch/ouch ~__ARCH__
 
 # ── GURU overlay ──────────────────────────────────────────────────────────────
