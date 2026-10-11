@@ -65,6 +65,11 @@ app-misc/yq-go          # bin:yq — mikefarah's GO yq (NOT app-misc/yq, which i
 #   app-shells/carapace  app-misc/1password-cli (op)
 #   app-misc/tealdeer  app-misc/yazi  dev-vcs/lazygit  app-shells/direnv
 #   net-analyzer/gping
+#   1password-cli is GURU-only BY CHOICE, not by availability: ::gentoo does
+#   carry 1Password's CLI, as app-admin/op-cli-bin — but at 2.23.0, ~arch only,
+#   far behind GURU's app-misc/1password-cli (2.39.0, 2026-10). Both are
+#   proprietary + ~arch, so the main-tree atom buys nothing but age. Do not
+#   swap to it, and do not add it alongside: both ship the same `op` binary.
 # Provided by mise (gentoo/mise-tools.toml), NOT emerged:
 #   gum
 #   Do NOT add app-misc/gum back: no such ebuild exists in ::gentoo OR in GURU
