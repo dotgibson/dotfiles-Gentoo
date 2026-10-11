@@ -1188,7 +1188,18 @@ _boot_tmp_setup() {
     export TMPDIR="$_BOOT_TMP"
   else
     _BOOT_TMP=""
+    return 0
   fi
+  # Clean up on an ABORT too (a hard exit, or set -e), not only via bootstrap_closing —
+  # else every interrupted run strands a multi-GB run dir that no later run removes.
+  # Chain onto the EXIT trap already set (Core's sudo-keepalive stop); never replace it.
+  # `trap -p` prints `trap -- '<cmd>' EXIT`, shell-quoted; eval re-splits it safely.
+  local prev
+  local -a parts=()
+  prev="$(trap -p EXIT)"
+  eval "parts=(${prev:-})"
+  # shellcheck disable=SC2064  # expand NOW, on purpose: it embeds the existing command
+  trap "${parts[2]:+${parts[2]}; }_boot_tmp_cleanup" EXIT
   return 0
 }
 
@@ -1204,7 +1215,7 @@ cargo_install() {
   return "$rc"
 }
 
-# _boot_tmp_cleanup — called from bootstrap_closing: drop the per-run dir and hand the
+# _boot_tmp_cleanup — called from bootstrap_closing and the EXIT trap: drop the per-run dir and hand the
 # caller's TMPDIR back. The path guard keeps this rm from ever aiming at anything else.
 _boot_tmp_cleanup() {
   if [[ "${_BOOT_TMP:-}" == */dotfiles-bootstrap/run.* ]]; then
@@ -1218,6 +1229,7 @@ _boot_tmp_cleanup() {
     else
       unset TMPDIR
     fi
+    _BOOT_TMP="" # once only: the EXIT trap calls this again after bootstrap_closing
   fi
   return 0
 }
@@ -1226,7 +1238,7 @@ _boot_tmp_cleanup() {
 bootstrap_provision() {
   _boot_tmp_setup
   if ((USER_MODE == 0)); then
-    trap 'blib_sudo_keepalive_stop' EXIT
+    trap 'blib_sudo_keepalive_stop; _boot_tmp_cleanup' EXIT
     # A FAILED priming is not a reason to abort — it is a reason to fall back.
     #
     # blib_resolve_su answers "is there an escalator BINARY", which is a different
