@@ -475,7 +475,7 @@ _dotfiles_cargo_install() { # <crate> <binary-name>
   blib_say "$2 (cargo build — crate: $1)"
   local log cause
   log="$(_log_path "cargo-$2")"
-  if cargo install --locked "$1" >"${log:-/dev/null}" 2>&1; then
+  if cargo_install --locked "$1" >"${log:-/dev/null}" 2>&1; then
     [[ -n "$log" ]] && rm -f "$log"
     return 0
   fi
@@ -1171,8 +1171,60 @@ bootstrap_check() {
 # process waiting on a TTY read with nothing on screen: no output, no progress,
 # indistinguishable from a hang. Prime it once up front (visibly, at the start) and
 # refresh it in the background until we exit.
+# ── cargo builds go to DISK, not /tmp (dotfiles-Fedora#208) ────────────────────
+# `cargo install` builds in $TMPDIR (default /tmp), and yazi-build nests a second build
+# there too. Where /tmp is a tmpfs (systemd's default, often with a per-user quota) a few
+# crates fill it on a small box, and every later build and download fails with EDQUOT /
+# ENOSPC. _boot_tmp_setup points TMPDIR at a per-run dir on disk for the rest of
+# provisioning — unique per run (mktemp -d), so the sweeps below never reach into a
+# second bootstrap running at the same time. Ported from dotfiles-Fedora.
+_boot_tmp_setup() {
+  _BOOT_TMPDIR_ORIG="${TMPDIR-}"
+  _BOOT_TMPDIR_WAS_SET="${TMPDIR+1}"
+  _BOOT_TMP=""
+  local base="${XDG_CACHE_HOME:-$HOME/.cache}/dotfiles-bootstrap"
+  if mkdir -p "$base" 2>/dev/null &&
+    _BOOT_TMP="$(mktemp -d "$base/run.XXXXXX" 2>/dev/null)"; then
+    export TMPDIR="$_BOOT_TMP"
+  else
+    _BOOT_TMP=""
+  fi
+  return 0
+}
+
+# cargo_install <args…> — `cargo install`, then sweep its build dirs even on FAILURE:
+# cargo keeps cargo-install* when a build dies, and yazi-build keeps its nested
+# yazi-build-*, so one failed crate would strand GBs for the rest of the run.
+cargo_install() {
+  local rc=0
+  cargo install "$@" || rc=$?
+  if [[ -n "${_BOOT_TMP:-}" ]]; then
+    rm -rf -- "$_BOOT_TMP"/cargo-install* "$_BOOT_TMP"/yazi-build-*
+  fi
+  return "$rc"
+}
+
+# _boot_tmp_cleanup — called from bootstrap_closing: drop the per-run dir and hand the
+# caller's TMPDIR back. The path guard keeps this rm from ever aiming at anything else.
+_boot_tmp_cleanup() {
+  if [[ "${_BOOT_TMP:-}" == */dotfiles-bootstrap/run.* ]]; then
+    # Sweep the build scratch, then remove the dir only if it is EMPTY: the failure logs
+    # (_log_path) and a failed zsh build tree are named in their miss lines and must
+    # still exist when you go and read them, so a run that missed something keeps them.
+    rm -rf -- "$_BOOT_TMP"/cargo-install* "$_BOOT_TMP"/yazi-build-*
+    rmdir -- "$_BOOT_TMP" 2>/dev/null || true
+    if [[ -n "${_BOOT_TMPDIR_WAS_SET:-}" ]]; then
+      export TMPDIR="$_BOOT_TMPDIR_ORIG"
+    else
+      unset TMPDIR
+    fi
+  fi
+  return 0
+}
+
 # shellcheck disable=SC2329
 bootstrap_provision() {
+  _boot_tmp_setup
   if ((USER_MODE == 0)); then
     trap 'blib_sudo_keepalive_stop' EXIT
     # A FAILED priming is not a reason to abort — it is a reason to fall back.
@@ -1236,6 +1288,14 @@ bootstrap_wire_pre_loader() {
   if ((USER_MODE)); then
     blib_say "user mode: not touching the login shell (chsh needs /etc/shells, which is root-only) — the ~/.bash_profile handoff does this instead"
   fi
+}
+
+# Runs after the wire phase. The per-run build dir (see "cargo builds go to DISK") goes
+# away here, and TMPDIR is restored.
+# shellcheck disable=SC2329
+bootstrap_closing() {
+  _boot_tmp_cleanup
+  return 0
 }
 
 blib_main "$@"
