@@ -143,6 +143,10 @@ dev-util/tree-sitter-cli  # bin:tree-sitter min:0.26.1 — backs nvim-treesitter
 dev-vcs/git             # `git subtree` ships with git on Gentoo
 net-misc/openssh        # bin:ssh — client + server (Gentoo ships one package)
 dev-vcs/git-absorb      # `git absorb` — auto-route staged hunks into earlier commits
+dev-util/github-cli     # bin:gh — GitHub CLI. Core already generates its completion
+                        #   and the doctor reports it as wired (_CORE_DOCTOR_WIRED),
+                        #   but only once `gh` is on PATH. 2.100.0 is STABLE on amd64
+                        #   + arm64 (2.101/2.102 are ~arch), so no keyword line
 dev-util/difftastic     # bin:difft — syntactic diff (core-doctor's `difft` row)
 
 # ── dev / repo tooling the doctor reports on ──────────────────
