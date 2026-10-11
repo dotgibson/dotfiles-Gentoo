@@ -65,14 +65,15 @@ app-misc/yq-go          # bin:yq — mikefarah's GO yq (NOT app-misc/yq, which i
 #   app-shells/carapace  app-misc/1password-cli (op)
 #   app-misc/tealdeer  app-misc/yazi  dev-vcs/lazygit  app-shells/direnv
 #   net-analyzer/gping
-# Provided by mise (gentoo/mise-tools.toml), NOT emerged:
+# NOT emerged: mise (gentoo/mise-tools.toml) on the --user path, `go install
+# charm.land/gum/v2` on the privileged path (bootstrap.sh's go-install block):
 #   gum
 #   Do NOT add app-misc/gum back: no such ebuild exists in ::gentoo OR in GURU
 #   (the only packaged form is dev-util/gum in the jaredallard overlay, which
 #   this repo does not enable — same shape as shfmt below),
 #   so it can only ever emerge as a `skipped:` line — which reads like a keyword
 #   mask and gets "fixed" with an accept_keywords entry that unmasks nothing.
-#   That is exactly how it survived in the guru_install list; mise owns gum.
+#   That is exactly how it survived in the guru_install list.
 # Installed via `go install` (not packaged anywhere), handled in bootstrap.sh:
 #   gron  sesh  shfmt
 #   shfmt is absent from BOTH ::gentoo and GURU (PORTING-MATRIX footnote 7): there

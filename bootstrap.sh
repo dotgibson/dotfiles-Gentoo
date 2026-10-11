@@ -1084,9 +1084,14 @@ provision() {
   # nvim's conform formatter and is the one tool in this stack that is absent from
   # BOTH ::gentoo and GURU (PORTING-MATRIX footnote 7 — there is no dev-go/shfmt
   # atom, and the overlays that do carry it call it dev-util/shfmt).
+  # gum is in the same position (no ebuild in ::gentoo or GURU — never add
+  # app-misc/gum, see install/packages.txt). gentoo/mise-tools.toml supplies it on the
+  # --user path only, so without this line a privileged bootstrap left `core doctor`
+  # showing ✗ gum. Module path is charm.land/gum/v2, NOT the GitHub URL (footnote 31).
   _dotfiles_go_install github.com/tomnomnom/gron@latest gron
   _dotfiles_go_install github.com/joshmedeski/sesh/v2@latest sesh
   _dotfiles_go_install mvdan.cc/sh/v3/cmd/shfmt@latest shfmt
+  _dotfiles_go_install charm.land/gum/v2@latest gum
 
   # ── opt-in extras (--no-extras skips these) ──────────────────────────────────
   # Every one is HAVE_*-gated in Core, so skipping them costs nothing but a ✗ in
