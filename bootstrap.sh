@@ -1171,6 +1171,12 @@ bootstrap_check() {
 # process waiting on a TTY read with nothing on screen: no output, no progress,
 # indistinguishable from a hang. Prime it once up front (visibly, at the start) and
 # refresh it in the background until we exit.
+# Script scope, so cleanup only ever consumes a dir THIS invocation's mktemp made: a
+# --links-only or --dry-run run never calls _boot_tmp_setup but still reaches
+# bootstrap_closing, and must not act on a _BOOT_TMP inherited from the environment.
+_BOOT_TMP=""
+export -n _BOOT_TMP 2>/dev/null || true
+
 # ── cargo builds go to DISK, not /tmp (dotfiles-Fedora#208) ────────────────────
 # `cargo install` builds in $TMPDIR (default /tmp), and yazi-build nests a second build
 # there too. Where /tmp is a tmpfs (systemd's default, often with a per-user quota) a few
