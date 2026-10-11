@@ -73,6 +73,7 @@ uv = "latest"
 ty = "latest"            # Astral's Python type checker; Core caches its completion beside uv's
 jj = "latest"
 difftastic = "latest"    # provides `difft`
+gh = "latest"            # GitHub CLI; aqua:cli/cli (dev-util/github-cli on the emerge path)
 # ── editor + multiplexer + treesitter ────────────────────────────────────────
 neovim = "latest"
 tmux = "latest"
