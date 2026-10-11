@@ -75,7 +75,7 @@ app-misc/yq-go          # bin:yq — mikefarah's GO yq (NOT app-misc/yq, which i
 #   mask and gets "fixed" with an accept_keywords entry that unmasks nothing.
 #   That is exactly how it survived in the guru_install list.
 # Installed via `go install` (not packaged anywhere), handled in bootstrap.sh:
-#   gron  sesh  shfmt
+#   gron  sesh  shfmt  gum (gum on the privileged path only — see above)
 #   shfmt is absent from BOTH ::gentoo and GURU (PORTING-MATRIX footnote 7): there
 #   is no dev-go/shfmt atom, and the third-party overlays that carry it call it
 #   dev-util/shfmt. So it takes the go path, like gron and sesh.
