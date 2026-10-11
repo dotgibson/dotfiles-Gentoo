@@ -494,7 +494,7 @@ _dotfiles_go_install() { # <import-path@version> <binary-name>
   if command -v "$2" >/dev/null 2>&1; then return 0; fi
   local gobin="$HOME/.local/bin"
   mkdir -p "$gobin" 2>/dev/null || true
-  local log cause rc=0
+  local log cause rc=0 via="go install" retry="GOBIN=$gobin go install $1"
   log="$(_log_path "go-$2")"
   if command -v go >/dev/null 2>&1; then
     GOBIN="$gobin" go install "$1" >"${log:-/dev/null}" 2>&1 || rc=1
@@ -503,6 +503,7 @@ _dotfiles_go_install() { # <import-path@version> <binary-name>
     # and mise (verified 2026.10.7) carries that into exec_auto_install, so a bare
     # `mise exec go@latest` on a box with no Go fails in ~2s instead of downloading it
     # (dotgibson/dotfiles-Fedora#209). It is a no-op once Go is present.
+    via="Go via mise (toolchain install or build)" retry="mise install go@latest && GOBIN=$gobin mise exec go@latest -- go install $1"
     { mise install go@latest && GOBIN="$gobin" mise exec go@latest -- go install "$1"; } >"${log:-/dev/null}" 2>&1 || rc=1
   else
     [[ -n "$log" ]] && rm -f "$log"
@@ -514,7 +515,7 @@ _dotfiles_go_install() { # <import-path@version> <binary-name>
     return 0
   fi
   cause="$(_log_tail "$log")"
-  blib_note_fail "$2: go install failed${cause:+ — $cause}${log:+ (full log: $log)} — retry later: GOBIN=$gobin go install $1"
+  blib_note_fail "$2: $via failed${cause:+ — $cause}${log:+ (full log: $log)} — retry later: $retry"
   return 0
 }
 
