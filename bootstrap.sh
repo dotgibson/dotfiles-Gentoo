@@ -475,7 +475,7 @@ _dotfiles_cargo_install() { # <crate> <binary-name>
   blib_say "$2 (cargo build — crate: $1)"
   local log cause
   log="$(_log_path "cargo-$2")"
-  if cargo install --locked "$1" >"${log:-/dev/null}" 2>&1; then
+  if cargo_install --locked "$1" >"${log:-/dev/null}" 2>&1; then
     [[ -n "$log" ]] && rm -f "$log"
     return 0
   fi
@@ -494,12 +494,17 @@ _dotfiles_go_install() { # <import-path@version> <binary-name>
   if command -v "$2" >/dev/null 2>&1; then return 0; fi
   local gobin="$HOME/.local/bin"
   mkdir -p "$gobin" 2>/dev/null || true
-  local log cause rc=0
+  local log cause rc=0 via="go install" retry="GOBIN=$gobin go install $1"
   log="$(_log_path "go-$2")"
   if command -v go >/dev/null 2>&1; then
     GOBIN="$gobin" go install "$1" >"${log:-/dev/null}" 2>&1 || rc=1
   elif command -v mise >/dev/null 2>&1; then
-    GOBIN="$gobin" mise exec go@latest -- go install "$1" >"${log:-/dev/null}" 2>&1 || rc=1
+    # `mise install go@latest` FIRST: Core's mise/config.toml sets auto_install = false,
+    # and mise (verified 2026.10.7) carries that into exec_auto_install, so a bare
+    # `mise exec go@latest` on a box with no Go fails in ~2s instead of downloading it
+    # (dotgibson/dotfiles-Fedora#209). It is a no-op once Go is present.
+    via="Go via mise (toolchain install or build)" retry="mise install go@latest && GOBIN=$gobin mise exec go@latest -- go install $1"
+    { mise install go@latest && GOBIN="$gobin" mise exec go@latest -- go install "$1"; } >"${log:-/dev/null}" 2>&1 || rc=1
   else
     [[ -n "$log" ]] && rm -f "$log"
     blib_note_fail "$2: needs Go — install later with: GOBIN=$gobin go install $1"
@@ -510,7 +515,7 @@ _dotfiles_go_install() { # <import-path@version> <binary-name>
     return 0
   fi
   cause="$(_log_tail "$log")"
-  blib_note_fail "$2: go install failed${cause:+ — $cause}${log:+ (full log: $log)} — retry later: GOBIN=$gobin go install $1"
+  blib_note_fail "$2: $via failed${cause:+ — $cause}${log:+ (full log: $log)} — retry later: $retry"
   return 0
 }
 
@@ -1067,6 +1072,7 @@ provision() {
   # tealdeer / yazi / lazygit / direnv are also GURU-only (not in the main tree),
   # so they belong here — the packages.txt emerge above runs before GURU is enabled,
   # so there they'd just fail with a `skipped:` line and never get retried.
+  # 1password-cli: ::gentoo's app-admin/op-cli-bin is stale — see install/packages.txt.
   guru_install \
     sys-apps/sd \
     app-misc/glow \
@@ -1171,10 +1177,80 @@ bootstrap_check() {
 # process waiting on a TTY read with nothing on screen: no output, no progress,
 # indistinguishable from a hang. Prime it once up front (visibly, at the start) and
 # refresh it in the background until we exit.
+# Script scope, so cleanup only ever consumes a dir THIS invocation's mktemp made: a
+# --links-only or --dry-run run never calls _boot_tmp_setup but still reaches
+# bootstrap_closing, and must not act on a _BOOT_TMP inherited from the environment.
+_BOOT_TMP=""
+export -n _BOOT_TMP 2>/dev/null || true
+
+# ── cargo builds go to DISK, not /tmp (dotfiles-Fedora#208) ────────────────────
+# `cargo install` builds in $TMPDIR (default /tmp), and yazi-build nests a second build
+# there too. Where /tmp is a tmpfs (systemd's default, often with a per-user quota) a few
+# crates fill it on a small box, and every later build and download fails with EDQUOT /
+# ENOSPC. _boot_tmp_setup points TMPDIR at a per-run dir on disk for the rest of
+# provisioning — unique per run (mktemp -d), so the sweeps below never reach into a
+# second bootstrap running at the same time. Ported from dotfiles-Fedora.
+_boot_tmp_setup() {
+  _BOOT_TMPDIR_ORIG="${TMPDIR-}"
+  _BOOT_TMPDIR_WAS_SET="${TMPDIR+1}"
+  _BOOT_TMP=""
+  local base="${XDG_CACHE_HOME:-$HOME/.cache}/dotfiles-bootstrap"
+  if mkdir -p "$base" 2>/dev/null &&
+    _BOOT_TMP="$(mktemp -d "$base/run.XXXXXX" 2>/dev/null)"; then
+    export TMPDIR="$_BOOT_TMP"
+  else
+    _BOOT_TMP=""
+    return 0
+  fi
+  # Clean up on an ABORT too (a hard exit, or set -e), not only via bootstrap_closing —
+  # else every interrupted run strands a multi-GB run dir that no later run removes.
+  # Chain onto the EXIT trap already set (Core's sudo-keepalive stop); never replace it.
+  # `trap -p` prints `trap -- '<cmd>' EXIT`, shell-quoted; eval re-splits it safely.
+  local prev
+  local -a parts=()
+  prev="$(trap -p EXIT)"
+  eval "parts=(${prev:-})"
+  # shellcheck disable=SC2064  # expand NOW, on purpose: it embeds the existing command
+  trap "${parts[2]:+${parts[2]}; }_boot_tmp_cleanup" EXIT
+  return 0
+}
+
+# cargo_install <args…> — `cargo install`, then sweep its build dirs even on FAILURE:
+# cargo keeps cargo-install* when a build dies, and yazi-build keeps its nested
+# yazi-build-*, so one failed crate would strand GBs for the rest of the run.
+cargo_install() {
+  local rc=0
+  cargo install "$@" || rc=$?
+  if [[ -n "${_BOOT_TMP:-}" ]]; then
+    rm -rf -- "$_BOOT_TMP"/cargo-install* "$_BOOT_TMP"/yazi-build-*
+  fi
+  return "$rc"
+}
+
+# _boot_tmp_cleanup — called from bootstrap_closing and the EXIT trap: drop the per-run dir and hand the
+# caller's TMPDIR back. The path guard keeps this rm from ever aiming at anything else.
+_boot_tmp_cleanup() {
+  if [[ "${_BOOT_TMP:-}" == */dotfiles-bootstrap/run.* ]]; then
+    # Sweep the build scratch, then remove the dir only if it is EMPTY: the failure logs
+    # (_log_path) and a failed zsh build tree are named in their miss lines and must
+    # still exist when you go and read them, so a run that missed something keeps them.
+    rm -rf -- "$_BOOT_TMP"/cargo-install* "$_BOOT_TMP"/yazi-build-*
+    rmdir -- "$_BOOT_TMP" 2>/dev/null || true
+    if [[ -n "${_BOOT_TMPDIR_WAS_SET:-}" ]]; then
+      export TMPDIR="$_BOOT_TMPDIR_ORIG"
+    else
+      unset TMPDIR
+    fi
+    _BOOT_TMP="" # once only: the EXIT trap calls this again after bootstrap_closing
+  fi
+  return 0
+}
+
 # shellcheck disable=SC2329
 bootstrap_provision() {
+  _boot_tmp_setup
   if ((USER_MODE == 0)); then
-    trap 'blib_sudo_keepalive_stop' EXIT
+    trap 'blib_sudo_keepalive_stop; _boot_tmp_cleanup' EXIT
     # A FAILED priming is not a reason to abort — it is a reason to fall back.
     #
     # blib_resolve_su answers "is there an escalator BINARY", which is a different
@@ -1236,6 +1312,14 @@ bootstrap_wire_pre_loader() {
   if ((USER_MODE)); then
     blib_say "user mode: not touching the login shell (chsh needs /etc/shells, which is root-only) — the ~/.bash_profile handoff does this instead"
   fi
+}
+
+# Runs after the wire phase. The per-run build dir (see "cargo builds go to DISK") goes
+# away here, and TMPDIR is restored.
+# shellcheck disable=SC2329
+bootstrap_closing() {
+  _boot_tmp_cleanup
+  return 0
 }
 
 blib_main "$@"

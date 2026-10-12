@@ -65,6 +65,11 @@ app-misc/yq-go          # bin:yq — mikefarah's GO yq (NOT app-misc/yq, which i
 #   app-shells/carapace  app-misc/1password-cli (op)
 #   app-misc/tealdeer  app-misc/yazi  dev-vcs/lazygit  app-shells/direnv
 #   net-analyzer/gping
+#   1password-cli is GURU-only BY CHOICE, not by availability: ::gentoo does
+#   carry 1Password's CLI, as app-admin/op-cli-bin — but at 2.23.0, ~arch only,
+#   far behind GURU's app-misc/1password-cli (2.39.0, 2026-10). Both are
+#   proprietary + ~arch, so the main-tree atom buys nothing but age. Do not
+#   swap to it, and do not add it alongside: both ship the same `op` binary.
 # NOT emerged: mise (gentoo/mise-tools.toml) on the --user path, `go install
 # charm.land/gum/v2` on the privileged path (bootstrap.sh's go-install block):
 #   gum
@@ -144,6 +149,10 @@ dev-util/tree-sitter-cli  # bin:tree-sitter min:0.26.1 — backs nvim-treesitter
 dev-vcs/git             # `git subtree` ships with git on Gentoo
 net-misc/openssh        # bin:ssh — client + server (Gentoo ships one package)
 dev-vcs/git-absorb      # `git absorb` — auto-route staged hunks into earlier commits
+dev-util/github-cli     # bin:gh — GitHub CLI. Core already generates its completion
+                        #   and the doctor reports it as wired (_CORE_DOCTOR_WIRED),
+                        #   but only once `gh` is on PATH. 2.100.0 is STABLE on amd64
+                        #   + arm64 (2.101/2.102 are ~arch), so no keyword line
 dev-util/difftastic     # bin:difft — syntactic diff (core-doctor's `difft` row)
 
 # ── dev / repo tooling the doctor reports on ──────────────────
