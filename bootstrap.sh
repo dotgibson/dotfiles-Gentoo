@@ -102,7 +102,7 @@ Gentoo notes:
     gentoo/package.accept_keywords). Nothing in Core wires them by default
     (every one is HAVE_*-gated), so --no-extras is a faster first run — at the
     cost of a ✗ next to each in `core doctor`. The tools Core DOES wire
-    (tree-sitter, viddy, gron, sesh, shfmt) are always installed — tree-sitter as
+    (tree-sitter, viddy, gron, sesh, shfmt, gum) are always installed — tree-sitter as
     an emerged atom now (so --getbinpkg can supply it), the rest via cargo/go.
   • A keyword/USE-masked atom is skipped, reported, and never fatal; the run
     ends with a list of everything that did not complete. --strict turns that
@@ -1008,7 +1008,7 @@ provision() {
     ((${#atoms[@]})) && printf '     %s\n' "${atoms[@]}"
     blib_say "would enable the GURU overlay and emerge its tools (best-effort)"
     blib_say "would install mise / viddy where missing (tree-sitter-cli is an atom above)"
-    blib_say "would go-install: gron, sesh, shfmt"
+    blib_say "would go-install: gron, sesh, shfmt, gum"
     if ((EXTRAS)); then
       # --dry-run promises the full plan, so name both paths: "emerged" vs "built
       # from source" is the single most operationally relevant difference between
@@ -1072,6 +1072,7 @@ provision() {
   # tealdeer / yazi / lazygit / direnv are also GURU-only (not in the main tree),
   # so they belong here — the packages.txt emerge above runs before GURU is enabled,
   # so there they'd just fail with a `skipped:` line and never get retried.
+  # 1password-cli: ::gentoo's app-admin/op-cli-bin is stale — see install/packages.txt.
   guru_install \
     sys-apps/sd \
     app-misc/glow \
@@ -1089,9 +1090,14 @@ provision() {
   # nvim's conform formatter and is the one tool in this stack that is absent from
   # BOTH ::gentoo and GURU (PORTING-MATRIX footnote 7 — there is no dev-go/shfmt
   # atom, and the overlays that do carry it call it dev-util/shfmt).
+  # gum is in the same position (no ebuild in ::gentoo or GURU — never add
+  # app-misc/gum, see install/packages.txt). gentoo/mise-tools.toml supplies it on the
+  # --user path only, so without this line a privileged bootstrap left `core doctor`
+  # showing ✗ gum. Module path is charm.land/gum/v2, NOT the GitHub URL (footnote 31).
   _dotfiles_go_install github.com/tomnomnom/gron@latest gron
   _dotfiles_go_install github.com/joshmedeski/sesh/v2@latest sesh
   _dotfiles_go_install mvdan.cc/sh/v3/cmd/shfmt@latest shfmt
+  _dotfiles_go_install charm.land/gum/v2@latest gum
 
   # ── opt-in extras (--no-extras skips these) ──────────────────────────────────
   # Every one is HAVE_*-gated in Core, so skipping them costs nothing but a ✗ in
