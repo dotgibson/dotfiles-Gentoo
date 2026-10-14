@@ -59,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     container:
-      image: gentoo/stage3:latest@sha256:289abc94c521fdce95dc49f6fe9d5fd2a41c476d083b4620053f5c0b3db71f8e
+      image: gentoo/stage3:latest@sha256:faa32cce7310f28af521566a7b52ce0015d11efaac78d4fe4b09f1ac602297b6
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
