@@ -1190,13 +1190,34 @@ export -n _BOOT_TMP 2>/dev/null || true
 # ENOSPC. _boot_tmp_setup points TMPDIR at a per-run dir on disk for the rest of
 # provisioning — unique per run (mktemp -d), so the sweeps below never reach into a
 # second bootstrap running at the same time. Ported from dotfiles-Fedora.
+#
+# THE RUN DIR MUST BE REACHABLE BY THE `portage` USER (#1271). A root bootstrap runs
+# `emerge --getbinpkg`, which verifies each binary package's GnuPG signature as the
+# UNPRIVILEGED `portage` user (FEATURES=userpriv/sandbox), reading a signature file it
+# writes under $TMPDIR. Under `~/.cache` that is `/root/.cache/...` — and both the run
+# dir (mktemp -d is 0700) AND `/root` itself are unreadable by `portage`, so EVERY
+# binpkg failed verification ("gpg: can't open '.../portage-sign-*.sig': Permission
+# denied"), the bulk emerge and its one-by-one retry both died, and _emerge_skip_hint
+# misfiled all 40-odd atoms as "masked or keyworded". So as root, put the run dir under
+# world-traversable `/var/tmp` — Gentoo's own build-scratch home (PORTAGE_TMPDIR lives
+# there), still on disk for the ENOSPC reason above — and make the dir itself traversable
+# and readable. Unprivileged runs keep `~/.cache`: there is no second user to reach in.
 _boot_tmp_setup() {
   _BOOT_TMPDIR_ORIG="${TMPDIR-}"
   _BOOT_TMPDIR_WAS_SET="${TMPDIR+1}"
   _BOOT_TMP=""
-  local base="${XDG_CACHE_HOME:-$HOME/.cache}/dotfiles-bootstrap"
+  local base
+  if ((EUID == 0)); then
+    base="/var/tmp/dotfiles-bootstrap"
+  else
+    base="${XDG_CACHE_HOME:-$HOME/.cache}/dotfiles-bootstrap"
+  fi
   if mkdir -p "$base" 2>/dev/null &&
     _BOOT_TMP="$(mktemp -d "$base/run.XXXXXX" 2>/dev/null)"; then
+    # 0700 from mktemp hides the signature files from the portage verifier; 0755 lets it
+    # traverse and read them. Build scratch here is throwaway and root-owned, so a
+    # group/other-readable run dir on /var/tmp carries no secret worth guarding.
+    ((EUID == 0)) && chmod 0755 "$_BOOT_TMP" 2>/dev/null || true
     export TMPDIR="$_BOOT_TMP"
   else
     _BOOT_TMP=""
